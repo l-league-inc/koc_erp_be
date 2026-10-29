@@ -1,11 +1,8 @@
-from .base import *
-from urllib.parse import quote
-
-import firebase_admin
-from firebase_admin import credentials
 import sentry_sdk
-from sentry_sdk.integrations.django import DjangoIntegration
 from config.sentry_utils import before_send, before_send_transaction
+from sentry_sdk.integrations.django import DjangoIntegration
+
+from .base import *
 
 DJANGO_ENV_NAME = os.getenv("DJANGO_ENV_NAME", "main")
 
@@ -17,6 +14,7 @@ DEBUG = False
 ALLOWED_HOSTS = [
     "dev.api.koc-erp.co.kr",
     "api.koc-erp.co.kr",
+    "kocerpbe-dev.up.railway.app",
     ".railway.app",
 ]
 
@@ -138,6 +136,7 @@ CORS_ORIGIN_WHITELIST = [
     "https://dev-admin.koc-erp.co.kr",  # Frontend Domain URI
     "https://dev.api.koc-erp.co.kr",  # Backend Domain URI
     "https://api.koc-erp.co.kr",  # Backend Domain URI
+    "https://kocerpbe-dev.up.railway.app",  # Dev temporary API
     "https://dev.d4ay0e6oi9l0f.amplifyapp.com",  # Amplify URI
     "https://koc-erp-fe.vercel.app",  # Vercel URI
     "https://*.railway.app",
@@ -163,6 +162,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://dev-admin.koc-erp.co.kr",  # Frontend Domain URI
     "https://dev.api.koc-erp.co.kr",  # Backend Domain URI
     "https://api.koc-erp.co.kr",  # Backend Domain URI
+    "https://kocerpbe-dev.up.railway.app",  # Dev temporary API
     "https://dev.d4ay0e6oi9l0f.amplifyapp.com",  # Amplify URI
     "https://koc-erp-fe.vercel.app",  # Vercel URI
     "https://*.railway.app",
@@ -172,20 +172,24 @@ CSRF_TRUSTED_ORIGINS = [
     "https://apps-in-toss.toss.im",  # Toss mini 개발자 앱 URI
 ]
 
-SESSION_COOKIE_DOMAIN = ".koc-erp.co.kr"
-CSRF_COOKIE_DOMAIN = ".koc-erp.co.kr"
-
 # URL settings
 if DJANGO_ENV_NAME == "main":
     BASE_URL = "https://api.koc-erp.co.kr"
     SERVER_DOMAIN_NAME = "https://api.koc-erp.co.kr"
     KAKAO_LOGIN_DOMAIN = "https://www.koc-erp.co.kr"
     FRONTEND_URL = "https://www.koc-erp.co.kr"
+    SESSION_COOKIE_DOMAIN = ".koc-erp.co.kr"
+    CSRF_COOKIE_DOMAIN = ".koc-erp.co.kr"
 elif DJANGO_ENV_NAME == "dev":
-    BASE_URL = "https://dev.api.koc-erp.co.kr"
-    SERVER_DOMAIN_NAME = "https://dev.api.koc-erp.co.kr"
+    BASE_URL = "https://kocerpbe-dev.up.railway.app"
+    SERVER_DOMAIN_NAME = BASE_URL
     KAKAO_LOGIN_DOMAIN = "http://127.0.0.1:3000"
     FRONTEND_URL = "http://127.0.0.1:3000"
+    # railway.app 응답에는 .koc-erp.co.kr 쿠키를 심을 수 없다.
+    SESSION_COOKIE_DOMAIN = None
+    CSRF_COOKIE_DOMAIN = None
+    if not os.getenv("MCP_RESOURCE_URL"):
+        MCP_RESOURCE_URL = f"{BASE_URL}/mcp"
 
 
 # token expiration
@@ -260,50 +264,7 @@ FRONTEND_PASSWORD_RESET_SUCCESS_URL = f"{FRONTEND_URL}/auth/verifyEmailpw"
 
 # OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ASSISTANT_ID = os.getenv("ASSISTANT_ID")
 OPENAI_MODEL = "gpt-4o-mini"
-
-# kakao api
-KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
-KAKAO_ADMIN_KEY = os.getenv("KAKAO_ADMIN_KEY")
-KAKAO_LOGIN_REDIRECT_URI = f"{KAKAO_LOGIN_DOMAIN}/login/kakao/callback"
-
-# alimtalk
-ALIMTALK_APIKEY = os.getenv("ALIMTALK_APIKEY")
-ALIMTALK_USERID = os.getenv("ALIMTALK_USERID")
-ALIMTALK_ADMIN_NUMBER = os.getenv("ALIMTALK_ADMIN_NUMBER")
-
-# Replicate Config
-REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
-REPLICATE_TRAINING_WEBHOOK = f"{BASE_URL}/api/v1/train/replicate-webhook"
-REPLICATE_PREDICTION_WEBHOOK_COMPLETED = f"{BASE_URL}/api/v1/generate/replicate-webhook"
-
-
-# Firebase
-PUSH_PRIVATE_KEY = os.getenv("PUSH_PRIVATE_KEY")
-PUSH_CLIENT_EMAIL = os.getenv("PUSH_CLIENT_EMAIL") or ""
-PUSH_SERVICE_ACCOUNT_KEY = {
-    "type": "service_account",
-    "project_id": os.getenv("PUSH_PROJECT_ID"),
-    "private_key_id": os.getenv("PUSH_PRIVATE_KEY_ID"),
-    "private_key": PUSH_PRIVATE_KEY.replace("\\n", "\n") if PUSH_PRIVATE_KEY else None,
-    "client_email": PUSH_CLIENT_EMAIL,
-    "client_id": os.getenv("PUSH_CLIENT_ID"),
-    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/"
-    + quote(PUSH_CLIENT_EMAIL, safe=""),
-    "universe_domain": "googleapis.com",
-}
-cred = credentials.Certificate(PUSH_SERVICE_ACCOUNT_KEY)
-FCM_APP = firebase_admin.initialize_app(cred)
-
-# Toss
-TOSS_SECRET_KEY = os.getenv("TOSS_SECRET_KEY")
-TOSSPAYMENTS_MID = os.getenv("TOSSPAYMENTS_MID")
-TOSS_MERT_KEY = os.getenv("TOSS_MERT_KEY")
-
 
 # Sentry
 sentry_sdk.init(
@@ -323,14 +284,3 @@ sentry_sdk.init(
 
 # Scheduling
 SCHEDULING_SECRET_KEY = os.getenv("SCHEDULING_SECRET_KEY")
-
-# YouTube Settings
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID")
-
-# MyRealTrip Settings
-MYREALTRIP_API_KEY = os.getenv("MYREALTRIP_API_KEY")
-
-# Webhook Settings
-AGENT_WEBHOOK_URL = "https://agent.koc-erp.co.kr/webhook"
-AGENT_WEBHOOK_API_KEY = os.getenv("AGENT_WEBHOOK_API_KEY")

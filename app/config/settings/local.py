@@ -1,11 +1,8 @@
-from .base import *
 import json
-from urllib.parse import quote
 
 from django.core.exceptions import ImproperlyConfigured
-import firebase_admin
-from firebase_admin import credentials
 
+from .base import *
 
 secret_file = os.path.join(BASE_DIR, "secrets.json")
 
@@ -142,68 +139,7 @@ REDIS_DB = 0
 
 # OpenAI
 OPENAI_API_KEY = get_secret("OPENAI_API_KEY")
-ASSISTANT_ID = get_secret("ASSISTANT_ID")
 OPENAI_MODEL = "gpt-4o-mini"
-
-# kakao api
-KAKAO_REST_API_KEY = get_secret("KAKAO_REST_API_KEY")
-KAKAO_ADMIN_KEY = get_secret("KAKAO_ADMIN_KEY")
-KAKAO_LOGIN_DOMAIN = "http://127.0.0.1:8000"
-# KAKAO_LOGIN_REDIRECT_URI = f"{KAKAO_LOGIN_DOMAIN}/login/kakao/callback"
-KAKAO_LOGIN_REDIRECT_URI = f"{KAKAO_LOGIN_DOMAIN}/api/v1/kakao/callback"
 
 # CloudFront
 CLOUDFRONT_URL = "https://d2559sqcuyrr6z.cloudfront.net"
-
-# alimtalk
-ALIMTALK_APIKEY = get_secret("ALIMTALK_APIKEY")
-ALIMTALK_USERID = get_secret("ALIMTALK_USERID")
-ALIMTALK_ADMIN_NUMBER = get_secret("ALIMTALK_ADMIN_NUMBER")
-
-# Replicate Config
-REPLICATE_API_TOKEN = get_secret("REPLICATE_API_TOKEN")
-REPLICATE_TRAINING_WEBHOOK = None
-REPLICATE_PREDICTION_WEBHOOK_COMPLETED = None
-
-
-# Firebase
-PUSH_PRIVATE_KEY = get_secret("PUSH_PRIVATE_KEY")
-PUSH_CLIENT_EMAIL = get_secret("PUSH_CLIENT_EMAIL")
-PUSH_SERVICE_ACCOUNT_KEY = {
-    "type": "service_account",
-    "project_id": get_secret("PUSH_PROJECT_ID"),
-    "private_key_id": get_secret("PUSH_PRIVATE_KEY_ID"),
-    "private_key": PUSH_PRIVATE_KEY.replace("\\n", "\n") if PUSH_PRIVATE_KEY else None,
-    "client_email": PUSH_CLIENT_EMAIL,
-    "client_id": get_secret("PUSH_CLIENT_ID"),
-    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/"
-    + quote(PUSH_CLIENT_EMAIL, safe=""),
-    "universe_domain": "googleapis.com",
-}
-cred = credentials.Certificate(PUSH_SERVICE_ACCOUNT_KEY)
-FCM_APP = firebase_admin.initialize_app(cred)
-
-
-# Toss
-TOSS_SECRET_KEY = get_secret("TOSS_SECRET_KEY")
-TOSSPAYMENTS_MID = get_secret("TOSSPAYMENTS_MID")
-TOSS_MERT_KEY = get_secret("TOSS_MERT_KEY")
-
-# YouTube Settings
-YOUTUBE_API_KEY = get_secret("YOUTUBE_API_KEY")
-YOUTUBE_CHANNEL_ID = get_secret("YOUTUBE_CHANNEL_ID")
-
-# MyRealTrip Settings
-MYREALTRIP_API_KEY = get_secret("MYREALTRIP_API_KEY")
-
-# Webhook Settings
-AGENT_WEBHOOK_URL = "https://agent.koc-erp.co.kr/webhook"
-AGENT_WEBHOOK_API_KEY = get_secret("AGENT_WEBHOOK_API_KEY")
-
-# 우체국 종적조회 (공공데이터포털). Decoding 키 권장. Encoding 키도 서버가 unquote한다.
-EPOST_TRACKING_SERVICE_KEY = secrets.get("EPOST_TRACKING_SERVICE_KEY") or os.getenv(
-    "EPOST_TRACKING_SERVICE_KEY", ""
-)

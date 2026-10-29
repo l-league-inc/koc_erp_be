@@ -34,7 +34,10 @@ class CatalogFilterTests(SimpleTestCase):
             "/api/v1/toss",
         )
         for method, path in self.endpoints:
-            self.assertIn(method, {"GET", "POST"})
+            if method == "PATCH":
+                self.assertEqual(path, "/api/v1/workspace/record/{record_id}")
+            else:
+                self.assertIn(method, {"GET", "POST"})
             self.assertFalse(
                 any(path == prefix or path.startswith(prefix + "/") for prefix in forbidden_prefixes),
                 path,
@@ -94,6 +97,30 @@ class CatalogFilterTests(SimpleTestCase):
         self.assertIn("email", spec.description)
         self.assertIn("name", spec.description)
         self.assertIn("정수 사용자 id", spec.description)
+
+    def test_workspace_tools_allow_read_create_update_not_delete(self):
+        self.assertIn(("GET", "/api/v1/workspace"), self.endpoints)
+        self.assertIn(("GET", "/api/v1/workspace/database"), self.endpoints)
+        self.assertIn(
+            ("GET", "/api/v1/workspace/database/{database_id}"),
+            self.endpoints,
+        )
+        self.assertIn(("GET", "/api/v1/workspace/record/{record_id}"), self.endpoints)
+        self.assertIn(("POST", "/api/v1/workspace/query"), self.endpoints)
+        self.assertIn(
+            ("POST", "/api/v1/workspace/database/{database_id}/record"),
+            self.endpoints,
+        )
+        self.assertIn(("PATCH", "/api/v1/workspace/record/{record_id}"), self.endpoints)
+        self.assertNotIn(("DELETE", "/api/v1/workspace/record/{record_id}"), self.endpoints)
+        self.assertNotIn(("POST", "/api/v1/workspace/database"), self.endpoints)
+        self.assertNotIn(
+            ("PATCH", "/api/v1/workspace/database/{database_id}"),
+            self.endpoints,
+        )
+        self.assertFalse(
+            any(method == "DELETE" and path.startswith("/api/v1/workspace") for method, path in self.endpoints)
+        )
 
     def test_tool_names_are_unique(self):
         names = [spec.name for spec in self.specs]

@@ -17,6 +17,7 @@ from user.kakaoapi import router as kakao_router
 from user.kakaoapi_v2 import router as kakao_v2_router
 from user.tossapi import router as toss_router
 from verification.api import router as verify_router
+from workspace.api import router as workspace_router
 
 from config.api import router as aws_router
 from mcp_server.oauth_metadata import metadata_body
@@ -78,6 +79,7 @@ base_api.add_router("api/v1/toss", toss_router)
 base_api.add_router("api/v1/notice", notice_router)
 base_api.add_router("api/v1/verify", verify_router)
 base_api.add_router("api/v1/notification", notification_router)
+base_api.add_router("api/v1/workspace", workspace_router)
 
 urlpatterns = [
     path(

@@ -47,6 +47,7 @@ AUTH_ME_PATH = "/api/v1/auth/me"
 _PATH_SEGMENT = re.compile(r"[^A-Za-z0-9_]")
 
 # 플러그인 스킬이 안내하는 도구만 공개한다.
+WORKSPACE_RECORD_PATCH = ("PATCH", "/api/v1/workspace/record/{record_id}")
 PUBLIC_ENDPOINTS = frozenset(
     {
         ("GET", "/api/v1/auth/me"),
@@ -54,6 +55,13 @@ PUBLIC_ENDPOINTS = frozenset(
         ("GET", "/api/v1/notice/{notice_id}"),
         ("GET", "/api/v1/notification"),
         ("GET", "/api/v1/notification/unread-count"),
+        ("GET", "/api/v1/workspace"),
+        ("GET", "/api/v1/workspace/database"),
+        ("GET", "/api/v1/workspace/database/{database_id}"),
+        ("GET", "/api/v1/workspace/record/{record_id}"),
+        ("POST", "/api/v1/workspace/query"),
+        ("POST", "/api/v1/workspace/database/{database_id}/record"),
+        WORKSPACE_RECORD_PATCH,
     }
 )
 OPEN_WORLD_POSTS = frozenset()
@@ -159,10 +167,14 @@ def has_upload(operation: Any) -> bool:
     return False
 
 
+def is_workspace_record_patch(method: str, path: str) -> bool:
+    return (method, path) == WORKSPACE_RECORD_PATCH
+
+
 def is_exposed(method: str, path: str, operation: Any) -> bool:
     if (method, path) not in PUBLIC_ENDPOINTS:
         return False
-    if method not in {"GET", "POST"}:
+    if method not in {"GET", "POST"} and not is_workspace_record_patch(method, path):
         return False
     if not operation.include_in_schema or operation.deprecated:
         return False
@@ -183,6 +195,10 @@ def is_exposed(method: str, path: str, operation: Any) -> bool:
         if is_blocked_auth(operation):
             return False
         return is_customer_auth(operation) or not _callbacks(operation)
+    if is_workspace_record_patch(method, path):
+        if not is_customer_auth(operation):
+            return False
+        return "수정" in summary
     if path.startswith("/api/v1/auth"):
         return False
     if not is_customer_auth(operation):
@@ -337,6 +353,8 @@ def _description(method: str, path: str, summary: str, detail: str) -> str:
         )
     if method == "POST":
         lines.append("이 호출은 데이터를 만들 수 있습니다. 실패해도 자동으로 다시 호출하지 않습니다.")
+    if method == "PATCH":
+        lines.append("이 호출은 레코드 값을 수정합니다. 레코드를 지우지는 않습니다.")
     lines.append(tool_safety(method, path)["justifications"]["read_only_justification"])
     text = "\n".join(lines)
     return text[:4000]

@@ -11,6 +11,7 @@ from django.conf import settings
 from mcp.server.mcpserver.exceptions import ToolError
 
 from mcp_server.auth import current_access_token, current_user_id
+from workspace.utils import MCP_CLIENT_HEADER
 from mcp_server.catalog import AUTH_ME_PATH, ToolSpec
 from mcp_server.redaction import omit_user_integer_ids, redact
 
@@ -36,6 +37,14 @@ class ApiTransport(Protocol):
         body: Any,
     ) -> ApiResult:
         """기존 API를 한 번 호출합니다. 쓰기는 재시도하지 않습니다."""
+
+
+def mcp_request_headers(token: str) -> dict[str, str]:
+    """MCP가 내부 API를 부를 때 레코드 활동 출처를 구분합니다."""
+    return {
+        "Authorization": f"Bearer {token}",
+        MCP_CLIENT_HEADER: "mcp",
+    }
 
 
 def internal_api_base_url() -> str:
@@ -75,7 +84,7 @@ class AsgiApiTransport:
                     path,
                     params=query or None,
                     json=body,
-                    headers={"Authorization": f"Bearer {token}"},
+                    headers=mcp_request_headers(token),
                 )
         except httpx.TimeoutException as exc:
             raise ToolError("요청 시간이 초과되었습니다.") from exc

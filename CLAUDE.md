@@ -35,3 +35,5 @@ applyTo: "**"
 |------|------|
 | [models.md](../docs/models.md) | CommonModel, 소프트 삭제, 마이그레이션 절차, UniqueConstraint |
 | [api-design.md](../docs/api-design.md) | 라우터 등록, 인증, 페이지네이션, 에러 응답, 파일 업로드 |
+| [workspace.md](../docs/workspace.md) | Notion형 워크스페이스 모델, 권한, MCP, Hermes |
+| [workspace_frontend.md](../docs/workspace_frontend.md) | KOC 워크스페이스 데이터베이스·레코드·조회 계약 |

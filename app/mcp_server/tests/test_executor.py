@@ -14,7 +14,13 @@ from django.conf import settings
 from config.routing import get_application
 from mcp_server.auth import current_access_token, current_user_id
 from mcp_server.catalog import ToolSpec, build_catalog
-from mcp_server.executor import ApiResult, AsgiApiTransport, execute_tool, internal_api_base_url
+from mcp_server.executor import (
+    ApiResult,
+    AsgiApiTransport,
+    execute_tool,
+    internal_api_base_url,
+    mcp_request_headers,
+)
 from mcp_server.oauth_server import _token_response
 from user.utils import get_access_token
 
@@ -50,6 +56,11 @@ def _spec(**overrides) -> ToolSpec:
 
 
 class ExecutorUnitTests(SimpleTestCase):
+    def test_mcp_request_headers_mark_client(self):
+        headers = mcp_request_headers("abc")
+        self.assertEqual(headers["Authorization"], "Bearer abc")
+        self.assertEqual(headers["X-KOC-Client"], "mcp")
+
     async def test_redacts_transport_payload_and_clamps_page_size(self):
         transport = FakeTransport(
             ApiResult(

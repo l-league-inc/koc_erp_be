@@ -35,6 +35,7 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 기본 경로는 `/api/v1/workspace`입니다.
 
 - `GET /` 워크스페이스 목록. `role`은 `owner`, `admin`, `member`
+- `GET /{workspace_id}/member` 멤버 목록. `user_id`, `name`, `role`
 - `GET /database` 데이터베이스 목록
 - `GET /database/{database_id}` 스키마. `properties`, `views`
 - `POST /query` 레코드 조회
@@ -102,10 +103,11 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 - 통합대장은 `database_slug` 없이 조회하고 `database_name`으로 분류 칸을 채운다.
 - 새 행은 `title`과 `values`를 함께 보낸다.
 - 수정 요청에는 바뀐 slug만 넣는다. 본문을 저장할 때만 `blocks`를 넣는다.
-- 담당자 선택 목록은 워크스페이스 멤버 id만 보낸다.
+- 담당자 선택 목록은 `GET /{workspace_id}/member`의 `user_id`만 보낸다. 화면 이름은 `name`으로 붙인다.
 
 ## 비범위
 
 - Notion.com 동기화, 수식, 롤업, 버튼
-- MCP로 삭제, 멤버 변경, 스키마 변경. AI 도구는 조회, 레코드 생성, 레코드 수정만 한다.
-- 화면의 자동화 워크봇 실행 이력. 이번 API는 워크스페이스 데이터만 다룬다.
+- MCP로 삭제, 멤버 변경, 스키마 변경. 워크스페이스 레코드 도구는 조회, 생성, 수정만 한다.
+- 화면의 자동화 워크봇. 계약은 [workbot_frontend.md](workbot_frontend.md)입니다.
+- 앱 안 업무 대화. 계약은 [agent_frontend.md](agent_frontend.md)입니다.

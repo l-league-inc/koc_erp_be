@@ -87,6 +87,7 @@ LOCAL_APPS = [
     "wiki",
     "mcp_server",
     "workspace",
+    "assistant",
 ]
 
 INSTALLED_APPS = CHANNEL_APPS + DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

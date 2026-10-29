@@ -325,6 +325,7 @@ class RecordActivity(CommonModel):
     class Source(models.TextChoices):
         USER = ("user", "사용자")
         MCP = ("mcp", "MCP")
+        AGENT = ("agent", "에이전트")
 
     record = models.ForeignKey(
         Record,

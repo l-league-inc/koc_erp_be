@@ -27,6 +27,7 @@ from workspace.outbound import (
     RecordDetailResponseSchema,
     RecordQueryResponseSchema,
     ViewResponseSchema,
+    WorkspaceMemberResponseSchema,
     WorkspaceResponseSchema,
 )
 from workspace.utils import (
@@ -53,6 +54,7 @@ from workspace.utils import (
     serialize_record,
     serialize_view,
     serialize_workspace,
+    list_members,
     update_block,
     update_database,
     update_property,
@@ -411,6 +413,17 @@ async def update_block_api(request, block_id: int, payload: BlockUpdateSchema):
 async def delete_block_api(request, block_id: int):
     await sync_to_async(delete_block)(request.auth, block_id, activity_source(request))
     return 204, None
+
+
+@router.get(
+    "/{workspace_id}/member",
+    summary="[C] 워크스페이스 멤버 조회",
+    description="워크스페이스 멤버의 사용자 id, 이름, 역할을 조회합니다.",
+    response=list[WorkspaceMemberResponseSchema],
+    auth=jwt_auth,
+)
+async def list_member_api(request, workspace_id: int):
+    return await sync_to_async(list_members)(request.auth, workspace_id)
 
 
 @router.get(

@@ -35,7 +35,13 @@ class CatalogFilterTests(SimpleTestCase):
         )
         for method, path in self.endpoints:
             if method == "PATCH":
-                self.assertEqual(path, "/api/v1/workspace/record/{record_id}")
+                self.assertIn(
+                    path,
+                    {
+                        "/api/v1/workspace/record/{record_id}",
+                        "/api/v1/workbot/{workbot_id}",
+                    },
+                )
             else:
                 self.assertIn(method, {"GET", "POST"})
             self.assertFalse(
@@ -112,6 +118,17 @@ class CatalogFilterTests(SimpleTestCase):
             self.endpoints,
         )
         self.assertIn(("PATCH", "/api/v1/workspace/record/{record_id}"), self.endpoints)
+        self.assertIn(("GET", "/api/v1/workspace/{workspace_id}/member"), self.endpoints)
+        self.assertIn(("GET", "/api/v1/workbot"), self.endpoints)
+        self.assertIn(("GET", "/api/v1/workbot/stats"), self.endpoints)
+        self.assertIn(("GET", "/api/v1/workbot/run"), self.endpoints)
+        self.assertIn(("POST", "/api/v1/workbot"), self.endpoints)
+        self.assertIn(("PATCH", "/api/v1/workbot/{workbot_id}"), self.endpoints)
+        self.assertIn(("POST", "/api/v1/workbot/{workbot_id}/run"), self.endpoints)
+        self.assertNotIn(("DELETE", "/api/v1/workbot/{workbot_id}"), self.endpoints)
+        self.assertNotIn(("POST", "/api/v1/workbot/draft"), self.endpoints)
+        self.assertNotIn(("POST", "/api/v1/workbot/run/{run_id}/confirm"), self.endpoints)
+        self.assertFalse(any(path.startswith("/api/v1/agent") for _method, path in self.endpoints))
         self.assertNotIn(("DELETE", "/api/v1/workspace/record/{record_id}"), self.endpoints)
         self.assertNotIn(("POST", "/api/v1/workspace/database"), self.endpoints)
         self.assertNotIn(

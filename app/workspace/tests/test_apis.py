@@ -6,7 +6,7 @@ from ninja.testing import TestAsyncClient
 
 from user.utils import get_access_token
 from workspace.api import router
-from workspace.models import Database, Property, RecordActivity, Workspace
+from workspace.models import Database, Property, RecordActivity, Workspace, WorkspaceMember
 from workspace.seed import seed_koc_workspace
 
 User = get_user_model()
@@ -147,6 +147,44 @@ class WorkspaceApiTests(TestCase):
             Property.objects.filter(database_id=sales_id, slug="note").count
         )()
         self.assertEqual(remaining, 1)
+
+    async def test_member_list_returns_names_for_members_only(self):
+        self.user.name = "박승원"
+        await sync_to_async(self.user.save)(update_fields=["name"])
+        listed = await self.client.get("/", headers=self.headers())
+        workspace_id = listed.json()[0]["id"]
+        colleague = await sync_to_async(User.objects.create_user)(
+            email="colleague@example.com",
+            password="password1234!",
+            status=User.UserStatusChoice.ACTIVE,
+            name="김영준",
+        )
+        await sync_to_async(WorkspaceMember.objects.create)(
+            workspace_id=workspace_id,
+            user=colleague,
+            role=WorkspaceMember.Role.MEMBER,
+        )
+
+        response = await self.client.get(
+            f"/{workspace_id}/member",
+            headers=self.headers(),
+        )
+        self.assertEqual(response.status_code, 200, response.json())
+        self.assertEqual(
+            response.json(),
+            [
+                {"user_id": self.user.id, "name": "박승원", "role": "owner"},
+                {"user_id": colleague.id, "name": "김영준", "role": "member"},
+            ],
+        )
+
+        denied = await self.client.get(
+            f"/{workspace_id}/member",
+            headers=self.headers(self.outsider),
+        )
+        self.assertEqual(denied.status_code, 403)
+        missing = await self.client.get("/999999/member", headers=self.headers())
+        self.assertEqual(missing.status_code, 404)
 
     async def test_seed_is_idempotent(self):
         await sync_to_async(seed_koc_workspace)()

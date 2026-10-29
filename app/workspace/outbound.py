@@ -13,6 +13,12 @@ class WorkspaceResponseSchema(Schema):
     updated_at: datetime
 
 
+class WorkspaceMemberResponseSchema(Schema):
+    user_id: int
+    name: str
+    role: str
+
+
 class PropertyResponseSchema(Schema):
     id: int
     database_id: int

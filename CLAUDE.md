@@ -37,3 +37,5 @@ applyTo: "**"
 | [api-design.md](../docs/api-design.md) | 라우터 등록, 인증, 페이지네이션, 에러 응답, 파일 업로드 |
 | [workspace.md](../docs/workspace.md) | Notion형 워크스페이스 모델, 권한, MCP, Hermes |
 | [workspace_frontend.md](../docs/workspace_frontend.md) | KOC 워크스페이스 데이터베이스·레코드·조회 계약 |
+| [agent_frontend.md](../docs/agent_frontend.md) | 앱 안 업무 대화, 초안 확정 |
+| [workbot_frontend.md](../docs/workbot_frontend.md) | 워크봇 저장, 실행, 통계 |

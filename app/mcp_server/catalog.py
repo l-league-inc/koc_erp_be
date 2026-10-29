@@ -48,6 +48,8 @@ _PATH_SEGMENT = re.compile(r"[^A-Za-z0-9_]")
 
 # 플러그인 스킬이 안내하는 도구만 공개한다.
 WORKSPACE_RECORD_PATCH = ("PATCH", "/api/v1/workspace/record/{record_id}")
+WORKBOT_PATCH = ("PATCH", "/api/v1/workbot/{workbot_id}")
+WORKBOT_RUN = ("POST", "/api/v1/workbot/{workbot_id}/run")
 PUBLIC_ENDPOINTS = frozenset(
     {
         ("GET", "/api/v1/auth/me"),
@@ -58,10 +60,17 @@ PUBLIC_ENDPOINTS = frozenset(
         ("GET", "/api/v1/workspace"),
         ("GET", "/api/v1/workspace/database"),
         ("GET", "/api/v1/workspace/database/{database_id}"),
+        ("GET", "/api/v1/workspace/{workspace_id}/member"),
         ("GET", "/api/v1/workspace/record/{record_id}"),
         ("POST", "/api/v1/workspace/query"),
         ("POST", "/api/v1/workspace/database/{database_id}/record"),
         WORKSPACE_RECORD_PATCH,
+        ("GET", "/api/v1/workbot"),
+        ("GET", "/api/v1/workbot/stats"),
+        ("GET", "/api/v1/workbot/run"),
+        ("POST", "/api/v1/workbot"),
+        WORKBOT_PATCH,
+        WORKBOT_RUN,
     }
 )
 OPEN_WORLD_POSTS = frozenset()
@@ -171,10 +180,16 @@ def is_workspace_record_patch(method: str, path: str) -> bool:
     return (method, path) == WORKSPACE_RECORD_PATCH
 
 
+def is_workbot_patch(method: str, path: str) -> bool:
+    return (method, path) == WORKBOT_PATCH
+
+
 def is_exposed(method: str, path: str, operation: Any) -> bool:
     if (method, path) not in PUBLIC_ENDPOINTS:
         return False
-    if method not in {"GET", "POST"} and not is_workspace_record_patch(method, path):
+    if method not in {"GET", "POST"} and not is_workspace_record_patch(
+        method, path
+    ) and not is_workbot_patch(method, path):
         return False
     if not operation.include_in_schema or operation.deprecated:
         return False
@@ -195,10 +210,14 @@ def is_exposed(method: str, path: str, operation: Any) -> bool:
         if is_blocked_auth(operation):
             return False
         return is_customer_auth(operation) or not _callbacks(operation)
-    if is_workspace_record_patch(method, path):
+    if is_workspace_record_patch(method, path) or is_workbot_patch(method, path):
         if not is_customer_auth(operation):
             return False
         return "수정" in summary
+    if (method, path) == WORKBOT_RUN:
+        if not is_customer_auth(operation):
+            return False
+        return "실행" in summary
     if path.startswith("/api/v1/auth"):
         return False
     if not is_customer_auth(operation):

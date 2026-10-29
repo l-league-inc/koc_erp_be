@@ -138,6 +138,23 @@ def accessible_databases(user) -> QuerySet[Database]:
     return Database.objects.filter(workspace_id__in=workspace_ids)
 
 
+def list_members(user, workspace_id: int) -> list[dict[str, Any]]:
+    get_membership(user, workspace_id)
+    members = (
+        WorkspaceMember.objects.filter(workspace_id=workspace_id)
+        .select_related("user")
+        .order_by("id")
+    )
+    return [
+        {
+            "user_id": member.user_id,
+            "name": member.user.name or "",
+            "role": member.role,
+        }
+        for member in members
+    ]
+
+
 def list_workspaces(user) -> list[Workspace]:
     memberships = WorkspaceMember.objects.filter(user=user).select_related("workspace")
     items: list[Workspace] = []

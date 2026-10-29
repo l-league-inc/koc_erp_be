@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>위키 로그인</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f4f6f8;
+        font-family: "Pretendard", "Noto Sans KR", Arial, sans-serif;
+        color: #1f2933;
+      }
+      .card {
+        width: 100%;
+        max-width: 380px;
+        background: #fff;
+        padding: 32px;
+        border-radius: 16px;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+      }
+      h1 { margin: 0 0 8px; font-size: 24px; }
+      p { color: #6b7280; margin: 0 0 20px; }
+      label { display: block; font-size: 13px; margin: 12px 0 6px; }
+      input {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        box-sizing: border-box;
+      }
+      button {
+        width: 100%;
+        margin-top: 18px;
+        padding: 12px;
+        border: 0;
+        border-radius: 8px;
+        background: #0f766e;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .error {
+        background: #fef2f2;
+        color: #b91c1c;
+        padding: 10px 12px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <form class="card" method="post">
+      {% csrf_token %}
+      <h1>문서 위키</h1>
+      <p>관리자 계정으로만 확인할 수 있습니다.</p>
+      {% if error %}
+      <div class="error">{{ error }}</div>
+      {% endif %}
+      <input type="hidden" name="next" value="{{ next }}" />
+      <label for="email">이메일</label>
+      <input id="email" name="email" type="email" autocomplete="username" required />
+      <label for="password">비밀번호</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required />
+      <button type="submit">로그인</button>
+    </form>
+  </body>
+</html>

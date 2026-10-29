@@ -1,0 +1,10 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "./railway/Dockerfile"
+watchPatterns = [
+    "requirements.txt",
+    "app/**",
+    "railway.toml",
+    "railway/Dockerfile",
+    "poetry.lock",
+]

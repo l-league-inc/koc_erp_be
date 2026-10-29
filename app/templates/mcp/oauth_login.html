@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KOC ERP 연결</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f4f6f8;
+        font-family: "Pretendard", "Noto Sans KR", Arial, sans-serif;
+        color: #1f2933;
+      }
+      .card {
+        width: 100%;
+        max-width: 380px;
+        background: #fff;
+        padding: 32px;
+        border-radius: 16px;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+      }
+      h1 { margin: 0 0 8px; font-size: 24px; }
+      p { color: #6b7280; margin: 0 0 20px; line-height: 1.5; }
+      label { display: block; font-size: 13px; margin: 12px 0 6px; }
+      input {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        box-sizing: border-box;
+      }
+      button {
+        width: 100%;
+        margin-top: 18px;
+        padding: 12px;
+        border: 0;
+        border-radius: 8px;
+        background: #0f766e;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .social { margin-top: 16px; display: grid; gap: 8px; }
+      .social form { margin: 0; }
+      .social button { margin-top: 0; }
+      .kakao { background: #fee500; color: #191919; }
+      .apple { background: #111827; color: #fff; }
+      .error {
+        background: #fef2f2;
+        color: #b91c1c;
+        padding: 10px 12px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>KOC ERP 연결</h1>
+      {% if show_form %}
+      <p>이메일, 카카오, 애플 계정으로 ChatGPT에 연결합니다. 토스만으로 가입한 계정은 비밀번호를 만든 뒤 이메일로 연결합니다.</p>
+      {% if error %}
+      <div class="error">{{ error }}</div>
+      {% endif %}
+      <form method="post">
+        {% csrf_token %}
+        {% for name, value in oauth_fields.items %}
+        <input type="hidden" name="{{ name }}" value="{{ value }}" />
+        {% endfor %}
+        <label for="email">이메일</label>
+        <input id="email" name="email" type="email" autocomplete="username" required />
+        <label for="password">비밀번호</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+        <button type="submit">이메일로 연결</button>
+      </form>
+      <div class="social">
+        <form method="post" action="{% url 'oauth-kakao-start' %}">
+          {% csrf_token %}
+          {% for name, value in oauth_fields.items %}
+          <input type="hidden" name="{{ name }}" value="{{ value }}" />
+          {% endfor %}
+          <button class="kakao" type="submit">카카오로 연결</button>
+        </form>
+        <form method="post" action="{% url 'oauth-apple-start' %}">
+          {% csrf_token %}
+          {% for name, value in oauth_fields.items %}
+          <input type="hidden" name="{{ name }}" value="{{ value }}" />
+          {% endfor %}
+          <button class="apple" type="submit">애플로 연결</button>
+        </form>
+      </div>
+      {% else %}
+      <div class="error">{{ error }}</div>
+      {% endif %}
+    </div>
+  </body>
+</html>

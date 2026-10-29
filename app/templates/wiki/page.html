@@ -1,0 +1,9 @@
+{% extends "wiki/base.html" %}
+
+{% block title %}{{ page.title }} · KOC ERP 위키{% endblock %}
+
+{% block content %}
+  <article class="md">
+    {{ page.html|safe }}
+  </article>
+{% endblock %}

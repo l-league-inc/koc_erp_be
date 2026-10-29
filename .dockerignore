@@ -1,0 +1,23 @@
+# Git
+.git
+.gitignore
+
+# Docker
+.docker
+
+# Secrets / local env (must not enter image)
+.env
+.env.*
+secrets.json
+secrets_*.json
+certs/*.pem
+certs/*.key
+certs/*.crt
+
+# Python
+app/__pycache__/
+app/*/__pycache__/
+app/*/*/__pycache__/
+app/*/*/*/__pycache__/
+.venv/
+venv/

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>{{service_name}} API Server</title>
+    <style>
+      body {
+        font-family: "Arial", sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f0f0f0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+      }
+      .container {
+        text-align: center;
+        background: #fff;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+        max-width: 500px;
+        width: 100%;
+        animation: fadeIn 1.5s ease-in-out;
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(-20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      h1 {
+        color: #333;
+        font-size: 2.5em;
+        margin-bottom: 0.5em;
+      }
+      .info {
+        margin-top: 20px;
+      }
+      .info p {
+        color: #666;
+        margin: 10px 0;
+        font-size: 1.1em;
+      }
+      .info .version,
+      .info .time {
+        font-size: 1.3em;
+        font-weight: bold;
+        color: #333;
+      }
+      .info .label {
+        font-weight: normal;
+        color: #999;
+      }
+      .info .version {
+        margin-top: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>{{service_name}} API Server</h1>
+      <div class="info">
+        <p class="time">
+          <span class="label">Server time:</span> {{server_time}}
+        </p>
+        <p class="version">
+          <span class="label">Server version:</span> {{server_version}}
+        </p>
+      </div>
+    </div>
+  </body>
+</html>

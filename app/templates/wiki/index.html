@@ -1,0 +1,22 @@
+{% extends "wiki/base.html" %}
+
+{% block title %}문서 홈 · KOC ERP 위키{% endblock %}
+
+{% block content %}
+  <h1>문서 홈</h1>
+  <p class="empty">`docs/` 마크다운이 이 위키의 소스입니다. 파일을 추가하면 목록에 바로 나타납니다.</p>
+
+  {% if query %}
+    <h2>"{{ query }}" 검색 결과</h2>
+    {% if hits %}
+      {% for hit in hits %}
+      <article class="hit">
+        <a href="{% url 'wiki-page' hit.page.slug %}">{{ hit.page.title }}</a>
+        <p class="snippet">{{ hit.snippet }}</p>
+      </article>
+      {% endfor %}
+    {% else %}
+      <p class="empty">일치하는 문서가 없습니다.</p>
+    {% endif %}
+  {% endif %}
+{% endblock %}

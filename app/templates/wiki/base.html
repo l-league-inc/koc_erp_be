@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}KOC ERP 위키{% endblock %}</title>
+    <style>
+      :root {
+        --bg: #f4f6f8;
+        --panel: #ffffff;
+        --text: #1f2933;
+        --muted: #6b7280;
+        --line: #e5e7eb;
+        --accent: #0f766e;
+        --accent-soft: #ccfbf1;
+        --sidebar: #111827;
+        --sidebar-text: #d1d5db;
+        --sidebar-active: #5debcc;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; height: 100%; }
+      body {
+        font-family: "Pretendard", "Noto Sans KR", Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .layout { display: flex; min-height: 100vh; }
+      .sidebar {
+        width: 280px;
+        background: var(--sidebar);
+        color: var(--sidebar-text);
+        padding: 24px 18px;
+        flex-shrink: 0;
+      }
+      .brand { color: #fff; font-size: 18px; font-weight: 700; margin: 0 0 4px; }
+      .brand-sub { color: #9ca3af; font-size: 12px; margin: 0 0 20px; }
+      .search { margin-bottom: 20px; }
+      .search input {
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid #374151;
+        background: #1f2937;
+        color: #fff;
+      }
+      .group-title {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #9ca3af;
+        margin: 16px 0 8px;
+      }
+      .nav a {
+        display: block;
+        color: var(--sidebar-text);
+        padding: 6px 8px;
+        border-radius: 6px;
+        font-size: 14px;
+      }
+      .nav a.active, .nav a:hover {
+        background: #1f2937;
+        color: var(--sidebar-active);
+        text-decoration: none;
+      }
+      .main { flex: 1; min-width: 0; }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 32px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--line);
+      }
+      .topbar form { margin: 0; }
+      .content { padding: 32px; max-width: 920px; }
+      .md h1 { margin-top: 0; }
+      .md h2, .md h3 { margin-top: 1.6em; }
+      .md pre {
+        background: #111827;
+        color: #e5e7eb;
+        padding: 14px;
+        border-radius: 8px;
+        overflow-x: auto;
+      }
+      .md code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.92em;
+      }
+      .md :not(pre) > code {
+        background: var(--accent-soft);
+        padding: 1px 5px;
+        border-radius: 4px;
+      }
+      .md table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+      .md th, .md td {
+        border: 1px solid var(--line);
+        padding: 8px 10px;
+        text-align: left;
+      }
+      .md th { background: #f8fafc; }
+      .md blockquote {
+        border-left: 4px solid var(--accent);
+        margin: 16px 0;
+        padding: 4px 12px;
+        color: var(--muted);
+      }
+      .hit {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin-bottom: 12px;
+      }
+      .snippet { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
+      .btn {
+        background: var(--accent);
+        color: #fff;
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      .btn-ghost {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--line);
+      }
+      .empty { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <p class="brand">KOC ERP Wiki</p>
+        <p class="brand-sub">관리자 전용 문서</p>
+        <form class="search" method="get" action="{% url 'wiki-index' %}">
+          <input type="search" name="q" value="{{ query }}" placeholder="문서 검색" />
+        </form>
+        <nav class="nav">
+          {% if grouped_pages.frontend %}
+          <div class="group-title">프론트엔드</div>
+          {% for item in grouped_pages.frontend %}
+          <a href="{% url 'wiki-page' item.slug %}" class="{% if item.slug == current_slug %}active{% endif %}">{{ item.title }}</a>
+          {% endfor %}
+          {% endif %}
+          {% if grouped_pages.backend %}
+          <div class="group-title">백엔드</div>
+          {% for item in grouped_pages.backend %}
+          <a href="{% url 'wiki-page' item.slug %}" class="{% if item.slug == current_slug %}active{% endif %}">{{ item.title }}</a>
+          {% endfor %}
+          {% endif %}
+          {% if grouped_pages.all %}
+          <div class="group-title">공통</div>
+          {% for item in grouped_pages.all %}
+          <a href="{% url 'wiki-page' item.slug %}" class="{% if item.slug == current_slug %}active{% endif %}">{{ item.title }}</a>
+          {% endfor %}
+          {% endif %}
+        </nav>
+      </aside>
+      <section class="main">
+        <div class="topbar">
+          <a href="{% url 'wiki-index' %}">문서 홈</a>
+          <form method="post" action="{% url 'wiki-logout' %}">
+            {% csrf_token %}
+            <button class="btn btn-ghost" type="submit">로그아웃</button>
+          </form>
+        </div>
+        <div class="content">
+          {% block content %}{% endblock %}
+        </div>
+      </section>
+    </div>
+  </body>
+</html>

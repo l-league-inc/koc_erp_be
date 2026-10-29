@@ -1,0 +1,31 @@
+---
+description: 기능 개발 시 docs/ 위키 문서를 함께 작성한다
+alwaysApply: true
+---
+
+# 문서 위키 작성 규칙
+
+`docs/*.md`가 관리자 위키(`/wiki/`)의 소스다. 위키 CMS를 따로 편집하지 않는다.
+
+## 언제 문서를 쓰는가
+
+API 계약, 알림 `metadata`, 딥링크, 인증, 에러 코드가 바뀌면 `docs/`를 추가하거나 수정한다. 프론트가 알아야 하는 변경이면 문서를 빼먹지 않는다.
+
+## 프론트 전달 문서
+
+- 파일명: `{주제}_frontend.md`
+- 파일 상단 YAML frontmatter:
+
+```yaml
+---
+title: 짧은 제목
+audience: frontend
+---
+```
+
+- 유저 플로우, API, 페이로드, 구현 체크리스트, 비범위를 포함한다.
+- [CLAUDE.md](CLAUDE.md) 목차에 행을 추가한다.
+
+## 백엔드 전용 변경
+
+기존 [architecture.md](docs/architecture.md), [conventions.md](docs/conventions.md), [api-design.md](docs/api-design.md) 등을 갱신한다. 새 앱이면 architecture 앱 표에 넣는다.

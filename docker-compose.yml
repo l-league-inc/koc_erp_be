@@ -1,0 +1,48 @@
+version: "3.3"
+services:
+  app:
+    build:
+      context: .
+      args:
+        - DEV=true
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app
+      - ./docs:/app/docs:ro
+      - ./secrets.json:/app/secrets.json
+    command: >
+      sh -c "python manage.py wait_for_db &&
+             python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+    environment:
+      - DB_NAME=devdb
+      - DB_USER=devuser
+      - DB_PASSWORD=password1234!
+      - DJANGO_ENV_NAME=local
+    depends_on:
+      - db
+
+  db:
+    image: postgres:17-alpine
+    volumes:
+      - dev-db-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=devdb
+      - POSTGRES_USER=devuser
+      - POSTGRES_PASSWORD=password1234!
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - dev-redis-data:/data
+
+volumes:
+  dev-db-data:
+  dev-redis-data:
+
+

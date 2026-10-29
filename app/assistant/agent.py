@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Any
 
 from django.db import transaction
+from django.db.models import OuterRef, Subquery
 from ninja.errors import HttpError
 
 from assistant import llm
@@ -142,7 +143,15 @@ def serialize_session(session: AgentSession) -> dict[str, Any]:
         "workspace_id": session.workspace_id,
         "database_slug": session.database_slug,
         "created_at": session.created_at,
+        "updated_at": session.updated_at,
     }
+
+
+def _preview(content: str) -> str:
+    text = " ".join((content or "").split())
+    if len(text) <= 80:
+        return text
+    return text[:80] + "…"
 
 
 def _session(user, session_id: int) -> AgentSession:
@@ -166,6 +175,35 @@ def _scoped_slug(session: AgentSession, requested: str) -> str:
     if session.database_slug and cleaned and cleaned != session.database_slug:
         raise HttpError(400, "이 대화는 선택한 영역만 다룹니다.")
     return cleaned or session.database_slug
+
+
+def list_sessions(user, workspace_id: int | None) -> list[dict[str, Any]]:
+    sessions = AgentSession.objects.filter(user=user)
+    if workspace_id is not None:
+        get_membership(user, workspace_id)
+        sessions = sessions.filter(workspace_id=workspace_id)
+    last_content = (
+        AgentMessage.objects.filter(session=OuterRef("pk")).order_by("-id").values("content")[:1]
+    )
+    rows = sessions.annotate(last_content=Subquery(last_content)).order_by("-updated_at", "-id")[:50]
+    payload = []
+    for session in rows:
+        item = serialize_session(session)
+        item["preview"] = _preview(session.last_content or "")
+        payload.append(item)
+    return payload
+
+
+def get_session_detail(user, session_id: int) -> dict[str, Any]:
+    session = _session(user, session_id)
+    detail = serialize_session(session)
+    detail["messages"] = [
+        serialize_message(message) for message in session.messages.order_by("id")
+    ]
+    detail["proposed_actions"] = [
+        serialize_action(action) for action in session.proposed_actions.order_by("id")
+    ]
+    return detail
 
 
 def create_session(user, workspace_id: int, database_slug: str) -> dict[str, Any]:
@@ -324,6 +362,7 @@ def send_message(user, session_id: int, content: str) -> dict[str, Any]:
         role=AgentMessage.Role.ASSISTANT,
         content=answer,
     )
+    session.save(update_fields=["updated_at"])
     actions = ProposedAction.objects.filter(id__in=created).order_by("id")
     return {
         "message": serialize_message(message),
@@ -378,6 +417,7 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
         records.append(
             {"action_id": action.id, "record_id": saved["id"], "title": saved["title"]}
         )
+    session.save(update_fields=["updated_at"])
     return {
         "proposed_actions": [serialize_action(action) for action in actions],
         "records": records,

@@ -128,6 +128,8 @@ class CatalogFilterTests(SimpleTestCase):
         self.assertNotIn(("DELETE", "/api/v1/workbot/{workbot_id}"), self.endpoints)
         self.assertNotIn(("POST", "/api/v1/workbot/draft"), self.endpoints)
         self.assertNotIn(("POST", "/api/v1/workbot/run/{run_id}/confirm"), self.endpoints)
+        self.assertNotIn(("GET", "/api/v1/agent/session"), self.endpoints)
+        self.assertNotIn(("GET", "/api/v1/agent/session/{session_id}"), self.endpoints)
         self.assertFalse(any(path.startswith("/api/v1/agent") for _method, path in self.endpoints))
         self.assertNotIn(("DELETE", "/api/v1/workspace/record/{record_id}"), self.endpoints)
         self.assertNotIn(("POST", "/api/v1/workspace/database"), self.endpoints)

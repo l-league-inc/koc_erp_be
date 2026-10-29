@@ -2,13 +2,21 @@ from asgiref.sync import sync_to_async
 from ninja import Query, Router
 
 from api.security import jwt_auth
-from assistant.agent import confirm_actions, create_session, send_message
+from assistant.agent import (
+    confirm_actions,
+    create_session,
+    get_session_detail,
+    list_sessions,
+    send_message,
+)
 from assistant.schemas import (
     ConfirmResultSchema,
     ConfirmSchema,
     MessageCreateSchema,
     MessageResultSchema,
     SessionCreateSchema,
+    SessionDetailSchema,
+    SessionListItemSchema,
     SessionResponseSchema,
     WorkbotDraftResponseSchema,
     WorkbotDraftSchema,
@@ -52,6 +60,28 @@ async def create_session_api(request, payload: SessionCreateSchema):
         payload.database_slug,
     )
     return 201, session
+
+
+@agent_router.get(
+    "/session",
+    summary="[C] 업무 대화 목록 조회",
+    description="호출자의 최근 대화 50개를 조회합니다. workspace_id가 있으면 그 공간만 돌려줍니다.",
+    response=list[SessionListItemSchema],
+    auth=jwt_auth,
+)
+async def list_session_api(request, workspace_id: int | None = Query(None)):
+    return await sync_to_async(list_sessions)(request.auth, workspace_id)
+
+
+@agent_router.get(
+    "/session/{session_id}",
+    summary="[C] 업무 대화 조회",
+    description="대화의 메시지와 초안을 시간순으로 조회합니다.",
+    response=SessionDetailSchema,
+    auth=jwt_auth,
+)
+async def get_session_api(request, session_id: int):
+    return await sync_to_async(get_session_detail)(request.auth, session_id)
 
 
 @agent_router.post(

@@ -14,6 +14,11 @@ class SessionResponseSchema(Schema):
     workspace_id: int
     database_slug: str
     created_at: datetime
+    updated_at: datetime
+
+
+class SessionListItemSchema(SessionResponseSchema):
+    preview: str
 
 
 class MessageCreateSchema(Schema):
@@ -33,6 +38,11 @@ class ProposedActionResponseSchema(Schema):
     status: str
     payload: dict
     result: dict
+
+
+class SessionDetailSchema(SessionResponseSchema):
+    messages: list[MessageResponseSchema]
+    proposed_actions: list[ProposedActionResponseSchema]
 
 
 class MessageResultSchema(Schema):

@@ -92,6 +92,26 @@ class AgentApiTests(TestCase):
         activity = await sync_to_async(RecordActivity.objects.get)(record_id=record_id)
         self.assertEqual(activity.source, RecordActivity.Source.AGENT)
 
+        listed = await self.client.get("/session", headers=self.headers())
+        self.assertEqual(listed.status_code, 200, listed.json())
+        self.assertEqual(listed.json()[0]["id"], session_id)
+        self.assertEqual(listed.json()[0]["preview"], "출근 초안을 만들었습니다.")
+
+        detail = await self.client.get(f"/session/{session_id}", headers=self.headers())
+        self.assertEqual(detail.status_code, 200, detail.json())
+        self.assertEqual(
+            [item["role"] for item in detail.json()["messages"]],
+            ["user", "assistant"],
+        )
+        self.assertEqual(detail.json()["messages"][0]["content"], "오늘 출근 등록해줘")
+        self.assertEqual(detail.json()["proposed_actions"][0]["status"], "confirmed")
+
+        hidden = await self.client.get(
+            f"/session/{session_id}",
+            headers=self.headers(self.outsider),
+        )
+        self.assertEqual(hidden.status_code, 404)
+
     async def test_outsider_cannot_start_session(self):
         workspace_id = await self._workspace_id()
         response = await self.client.post(
@@ -100,3 +120,8 @@ class AgentApiTests(TestCase):
             headers=self.headers(self.outsider),
         )
         self.assertEqual(response.status_code, 403)
+        listed = await self.client.get(
+            f"/session?workspace_id={workspace_id}",
+            headers=self.headers(self.outsider),
+        )
+        self.assertEqual(listed.status_code, 403)

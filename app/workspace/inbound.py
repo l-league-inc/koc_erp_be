@@ -21,6 +21,8 @@ class DatabaseCreateSchema(Schema):
     slug: str
     description: str = ""
     icon: str = ""
+    section: str = ""
+    section_slug: str = ""
     position: int = 0
 
 
@@ -29,6 +31,8 @@ class DatabaseUpdateSchema(Schema):
     slug: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
+    section: Optional[str] = None
+    section_slug: Optional[str] = None
     position: Optional[int] = None
 
 

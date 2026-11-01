@@ -30,6 +30,17 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 
 `title`은 모든 데이터베이스의 제목 속성입니다. 응답 `title`과 `values.title`은 같습니다. 상태 이름은 `진행 중`, `완료`, `대기`, `접수`처럼 옵션 `name`입니다. 담당 `owner`는 사용자 id 배열입니다.
 
+`python manage.py seed_koc_pages`가 만드는 데이터베이스는 `section`으로 페이지에 묶입니다. 통합관리대장은 데이터베이스를 비운 조회입니다. 임직원·과제·거래처 연결은 `relation`이고, 읽기 값은 `{id, title, database_id, database_slug}`입니다.
+
+| section_slug | 페이지 | 데이터베이스 |
+|--------------|--------|----------------|
+| `hr` | 인사 / 근태 관리 | `employees` 임직원, `attendance` 근무 기록, `leave` 휴가, `trip` 출장 |
+| `daily` | 일일 업무 관리 | `tasks` 일일 업무 |
+| `gov` | 정부과제 및 거래처 | `projects` 정부과제, `expenses` 과제 지출, `clients` 거래처 |
+| `purchase` | 구매 / 발주 / 재고 | `inventory` 재고 |
+| `sales` | 영업 / 견적 / A/S | `quotes` 견적, `after_service` A/S |
+| `docs` | 문서 및 사내규정 | `company_docs` 회사 문서, `policies` 사내규정 |
+
 ## 공통
 
 없는 id는 404, 멤버가 아니면 403, 값이 스키마와 다르면 400입니다. 삭제는 소프트 삭제이고 응답은 204입니다. 워크스페이스 수정은 `owner`와 `admin`, 삭제는 `owner`만 가능합니다. 데이터베이스, 속성, 레코드, 블록, 보기는 멤버라면 읽고 쓸 수 있습니다. 제목 속성은 지우거나 타입을 바꿀 수 없습니다. 값이 있는 속성은 타입을 바꿀 수 없습니다.
@@ -56,7 +67,7 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 
 ## 데이터베이스
 
-`GET /database` 목록. `id`, `workspace_id`, `name`, `slug`, `description`, `icon`, `position`, `created_at`, `updated_at`.
+`GET /database` 목록. `id`, `workspace_id`, `name`, `slug`, `description`, `icon`, `section`, `section_slug`, `position`, `created_at`, `updated_at`. `section`은 페이지 이름이고 `section_slug`는 페이지 키입니다. 페이지에 속하지 않으면 둘 다 빈 문자열입니다.
 
 `POST /database` 생성. 201. 제목 속성을 함께 만듭니다. 상세 응답에 `properties`, `views`가 있습니다.
 
@@ -67,13 +78,15 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
   "slug": "sales",
   "description": "",
   "icon": "briefcase",
+  "section": "영업 / 견적 / A/S",
+  "section_slug": "sales",
   "position": 0
 }
 ```
 
 `GET /database/{database_id}` 스키마. 목록 필드에 `properties`, `views`가 더 있습니다.
 
-`PATCH /database/{database_id}` `name`, `slug`, `description`, `icon`, `position`.
+`PATCH /database/{database_id}` `name`, `slug`, `description`, `icon`, `section`, `section_slug`, `position`.
 
 `DELETE /database/{database_id}` 데이터베이스와 속한 레코드를 지웁니다. 이 삭제는 휴지통 목록에 나오지 않습니다.
 

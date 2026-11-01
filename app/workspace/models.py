@@ -76,6 +76,8 @@ class Database(CommonModel):
     slug = models.SlugField(max_length=50, help_text="영역 키")
     description = models.TextField(blank=True, default="", help_text="설명")
     icon = models.CharField(max_length=50, blank=True, default="", help_text="아이콘")
+    section = models.CharField(max_length=100, blank=True, default="", help_text="페이지")
+    section_slug = models.SlugField(max_length=50, blank=True, default="", help_text="페이지 키")
     position = models.PositiveIntegerField(default=0, help_text="정렬 순서")
 
     class Meta:

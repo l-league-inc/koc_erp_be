@@ -8,7 +8,7 @@ KOC 워크스페이스의 데이터 원본은 Django입니다. Notion.com과 동
 |------|------|
 | `Workspace` | 회사 공간. 슬러그 `koc`가 기본 시드 |
 | `WorkspaceMember` | `owner` / `admin` / `member`. 이름 조회는 `GET /{workspace_id}/member` |
-| `Database` | 업무 영역. 슬러그 `hr`, `daily`, `gov`, `purchase`, `sales`, `docs` |
+| `Database` | 업무 영역. 스킬용 슬러그 `hr`, `daily`, `gov`, `purchase`, `sales`, `docs`. CSV 시드는 `section`으로 페이지에 묶습니다 |
 | `Property` | 컬럼. 데이터베이스마다 `title` 타입은 하나 |
 | `Record` | 행이자 페이지. `title`은 제목 속성과 같이 저장되고 `icon`은 페이지 아이콘 |
 | `PropertyValue` | 타입별 값. `(record, property)`는 삭제되지 않은 행만 유니크 |
@@ -21,7 +21,10 @@ KOC 워크스페이스의 데이터 원본은 Django입니다. Notion.com과 동
 
 수식, 롤업, 버튼, Notion 동기화 필드는 없습니다. 통합대장은 데이터베이스가 아니라 워크스페이스 전체 레코드 조회입니다. 관계 값을 읽을 때는 `{id, title, database_id, database_slug}`이고, 쓸 때는 레코드 id 배열입니다. 레코드 삭제는 `deleted_at`만 찍고 값·블록·관계는 남깁니다. 데이터베이스 삭제는 속한 레코드까지 소프트 삭제하므로 휴지통 목록에 나오지 않습니다.
 
-시드: `python manage.py seed_koc_workspace`. 활성(`status=A`) 사용자를 멤버로 넣습니다. 이미 있는 데이터베이스와 속성은 덮어쓰지 않습니다.
+시드 명령은 두 개입니다. 활성(`status=A`) 사용자를 멤버로 넣습니다. 이미 있는 데이터베이스, 속성, 같은 제목의 레코드는 덮어쓰지 않습니다.
+
+- `python manage.py seed_koc_workspace`: 에이전트 스킬이 쓰는 여섯 영역
+- `python manage.py seed_koc_pages`: CSV로 페이지 묶음, 데이터베이스, 레코드를 만듭니다. 통합관리대장은 데이터베이스가 아니라 워크스페이스 전체 레코드 조회입니다.
 
 ## 권한
 

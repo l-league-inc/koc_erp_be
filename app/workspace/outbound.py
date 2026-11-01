@@ -51,6 +51,8 @@ class DatabaseResponseSchema(Schema):
     slug: str
     description: str
     icon: str
+    section: str
+    section_slug: str
     position: int
     created_at: datetime
     updated_at: datetime

@@ -30,7 +30,7 @@ class WorkspaceMemberAdmin(admin.ModelAdmin):
 
 @admin.register(Database)
 class DatabaseAdmin(admin.ModelAdmin):
-    list_display = ["id", "workspace", "name", "slug", "position"]
+    list_display = ["id", "workspace", "section", "name", "slug", "position"]
     list_filter = ["workspace"]
     search_fields = ["name", "slug"]
 

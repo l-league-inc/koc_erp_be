@@ -161,7 +161,7 @@ async def get_database_api(request, database_id: int):
 @router.patch(
     "/database/{database_id}",
     summary="[C] 데이터베이스 수정",
-    description="데이터베이스 이름, 슬러그, 설명을 수정합니다.",
+    description="데이터베이스 이름, 슬러그, 설명, 페이지 묶음을 수정합니다.",
     response=DatabaseDetailResponseSchema,
     auth=jwt_auth,
 )

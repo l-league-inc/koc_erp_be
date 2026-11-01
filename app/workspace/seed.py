@@ -189,6 +189,15 @@ def _ensure_views(database: Database) -> None:
         )
 
 
+def ensure_koc_workspace() -> Workspace:
+    """KOC 워크스페이스를 없으면 만들고 활성 사용자를 멤버로 넣습니다."""
+    workspace = Workspace.objects.filter(slug=WORKSPACE_SLUG).first()
+    if workspace is None:
+        workspace = Workspace.objects.create(name=WORKSPACE_NAME, slug=WORKSPACE_SLUG)
+    _ensure_members(workspace)
+    return workspace
+
+
 def _ensure_members(workspace: Workspace) -> None:
     has_owner = workspace.members.filter(role=WorkspaceMember.Role.OWNER).exists()
     active_users = User.objects.filter(status=User.UserStatusChoice.ACTIVE).order_by("id")
@@ -205,9 +214,7 @@ def _ensure_members(workspace: Workspace) -> None:
 @transaction.atomic
 def seed_koc_workspace() -> Workspace:
     """KOC 워크스페이스와 여섯 업무 데이터베이스를 없으면 만듭니다."""
-    workspace = Workspace.objects.filter(slug=WORKSPACE_SLUG).first()
-    if workspace is None:
-        workspace = Workspace.objects.create(name=WORKSPACE_NAME, slug=WORKSPACE_SLUG)
+    workspace = ensure_koc_workspace()
 
     for position, spec in enumerate(DATABASES):
         database = workspace.databases.filter(slug=spec["slug"]).first()
@@ -222,5 +229,4 @@ def seed_koc_workspace() -> Workspace:
             )
         _ensure_properties(database, spec["properties"])
         _ensure_views(database)
-    _ensure_members(workspace)
     return workspace

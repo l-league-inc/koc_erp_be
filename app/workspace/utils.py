@@ -58,6 +58,13 @@ def activity_source(request) -> str:
     return RecordActivity.Source.USER
 
 
+def _section_slug(raw: Any) -> str:
+    cleaned = str(raw or "").strip()
+    if not cleaned:
+        return ""
+    return validate_slug(cleaned)
+
+
 def validate_slug(slug: str) -> str:
     cleaned = (slug or "").strip()
     if not SLUG_PATTERN.match(cleaned):
@@ -225,6 +232,8 @@ def serialize_database(database: Database, *, detail: bool = False) -> dict[str,
         "slug": database.slug,
         "description": database.description,
         "icon": database.icon,
+        "section": database.section,
+        "section_slug": database.section_slug,
         "position": database.position,
         "created_at": database.created_at,
         "updated_at": database.updated_at,
@@ -803,6 +812,8 @@ def create_database(user, data: dict[str, Any]) -> dict[str, Any]:
             slug=validate_slug(str(data["slug"])),
             description=data.get("description") or "",
             icon=data.get("icon") or "",
+            section=str(data.get("section") or "").strip(),
+            section_slug=_section_slug(data.get("section_slug")),
             position=data.get("position") or 0,
         )
         if not database.name:
@@ -832,6 +843,10 @@ def update_database(user, database_id: int, data: dict[str, Any]) -> dict[str, A
         database.description = data["description"]
     if data.get("icon") is not None:
         database.icon = data["icon"]
+    if data.get("section") is not None:
+        database.section = str(data["section"]).strip()
+    if data.get("section_slug") is not None:
+        database.section_slug = _section_slug(data.get("section_slug"))
     if data.get("position") is not None:
         database.position = data["position"]
 

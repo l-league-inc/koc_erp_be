@@ -16,24 +16,31 @@ class WorkspaceUpdateSchema(Schema):
 
 
 class DatabaseCreateSchema(Schema):
-    workspace_id: int
-    name: str
-    slug: str
-    description: str = ""
-    icon: str = ""
-    section: str = ""
-    section_slug: str = ""
-    position: int = 0
+    """데이터베이스를 만듭니다. section이 같으면 한 사이드바 페이지입니다."""
+
+    workspace_id: int = Field(description="워크스페이스 id")
+    name: str = Field(description="데이터베이스 이름")
+    slug: str = Field(description="데이터베이스 키. 영문 소문자로 시작하고 숫자와 _만 씁니다.")
+    description: str = Field("", description="설명")
+    icon: str = Field("", description="아이콘 키")
+    section: str = Field("", description="페이지 이름. 사이드바 묶음 제목입니다.")
+    section_slug: str = Field(
+        "",
+        description="페이지 키. 비우거나, 영문 소문자로 시작하고 숫자와 _만 씁니다.",
+    )
+    position: int = Field(0, description="같은 페이지 안에서의 정렬 순서")
 
 
 class DatabaseUpdateSchema(Schema):
-    name: Optional[str] = None
-    slug: Optional[str] = None
-    description: Optional[str] = None
-    icon: Optional[str] = None
-    section: Optional[str] = None
-    section_slug: Optional[str] = None
-    position: Optional[int] = None
+    """보낸 키만 바꿉니다. section_slug를 빈 문자열로 보내면 페이지 묶음을 해제합니다."""
+
+    name: Optional[str] = Field(None, description="데이터베이스 이름")
+    slug: Optional[str] = Field(None, description="데이터베이스 키")
+    description: Optional[str] = Field(None, description="설명")
+    icon: Optional[str] = Field(None, description="아이콘 키")
+    section: Optional[str] = Field(None, description="페이지 이름")
+    section_slug: Optional[str] = Field(None, description="페이지 키. 빈 문자열이면 묶음이 없습니다.")
+    position: Optional[int] = Field(None, description="정렬 순서")
 
 
 class PropertyCreateSchema(ModelSchema):
@@ -140,14 +147,25 @@ class RecordSortSchema(Schema):
 
 
 class RecordQuerySchema(Schema):
-    database_slug: Optional[str] = None
-    database_id: Optional[int] = None
-    view_id: Optional[int] = None
-    q: Optional[str] = None
-    filters: list[RecordFilterSchema] = Field(default_factory=list)
-    sorts: list[RecordSortSchema] = Field(default_factory=list)
-    page: int = Field(1, ge=1)
-    page_size: int = Field(20, ge=1, le=100)
+    """레코드 조회. database_slug, database_id, view_id를 모두 비우면 통합관리대장입니다."""
+
+    database_slug: Optional[str] = Field(
+        None,
+        description="데이터베이스 키. 비우면 멤버인 모든 데이터베이스를 조회합니다.",
+    )
+    database_id: Optional[int] = Field(
+        None,
+        description="데이터베이스 id. database_slug 대신 쓸 수 있습니다.",
+    )
+    view_id: Optional[int] = Field(
+        None,
+        description="보기 id. 이 보기의 필터를 요청 필터보다 먼저 적용합니다.",
+    )
+    q: Optional[str] = Field(None, description="제목 검색어")
+    filters: list[RecordFilterSchema] = Field(default_factory=list, description="속성 필터")
+    sorts: list[RecordSortSchema] = Field(default_factory=list, description="정렬")
+    page: int = Field(1, ge=1, description="페이지 번호")
+    page_size: int = Field(20, ge=1, le=100, description="페이지 크기. 상한은 100입니다.")
 
 
 BlockWriteSchema.model_rebuild()

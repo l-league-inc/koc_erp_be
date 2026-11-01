@@ -116,7 +116,12 @@ async def create_workspace_api(request, payload: WorkspaceCreateSchema):
 @router.get(
     "/database",
     summary="[C] 데이터베이스 목록 조회",
-    description="호출자가 속한 워크스페이스의 데이터베이스 목록을 조회합니다.",
+    description=(
+        "호출자가 속한 데이터베이스를 position, id 오름차순으로 돌려줍니다. "
+        "section은 페이지 이름이고 section_slug는 페이지 키입니다. "
+        "같은 section_slug를 한 사이드바 그룹으로 그립니다. "
+        "묶음이 없으면 둘 다 빈 문자열입니다."
+    ),
     response=list[DatabaseResponseSchema],
     auth=jwt_auth,
 )
@@ -134,7 +139,11 @@ async def list_database_api(request):
 @router.post(
     "/database",
     summary="[C] 데이터베이스 생성",
-    description="데이터베이스를 만들고 제목 속성을 함께 만듭니다.",
+    description=(
+        "데이터베이스를 만들고 제목 속성을 함께 만듭니다. "
+        "section은 페이지 이름, section_slug는 페이지 키입니다. "
+        "section_slug는 비우거나 영문 소문자로 시작하는 슬러그입니다."
+    ),
     response={201: DatabaseDetailResponseSchema},
     auth=jwt_auth,
 )
@@ -146,7 +155,11 @@ async def create_database_api(request, payload: DatabaseCreateSchema):
 @router.get(
     "/database/{database_id}",
     summary="[C] 데이터베이스 스키마 조회",
-    description="데이터베이스의 속성과 보기를 조회합니다.",
+    description=(
+        "데이터베이스의 속성과 보기를 조회합니다. "
+        "properties가 표 머리이고, 선택 목록은 config.options입니다. "
+        "relation의 config.database_id가 연결 대상입니다."
+    ),
     response=DatabaseDetailResponseSchema,
     auth=jwt_auth,
 )
@@ -161,7 +174,10 @@ async def get_database_api(request, database_id: int):
 @router.patch(
     "/database/{database_id}",
     summary="[C] 데이터베이스 수정",
-    description="데이터베이스 이름, 슬러그, 설명, 페이지 묶음을 수정합니다.",
+    description=(
+        "보낸 키만 바꿉니다. section은 페이지 이름, section_slug는 페이지 키입니다. "
+        "section_slug에 빈 문자열을 보내면 페이지 묶음을 해제합니다."
+    ),
     response=DatabaseDetailResponseSchema,
     auth=jwt_auth,
 )
@@ -300,7 +316,13 @@ async def delete_view_api(request, view_id: int):
 @router.post(
     "/query",
     summary="[C] 레코드 조회",
-    description="워크스페이스 레코드를 필터와 정렬로 조회합니다. 데이터베이스를 비우면 통합대장처럼 전체를 봅니다.",
+    description=(
+        "필터와 정렬로 레코드를 조회합니다. "
+        "database_slug, database_id, view_id를 모두 비우면 통합관리대장이고, "
+        "각 행의 database_slug와 database_name으로 데이터베이스를 구분합니다. "
+        "view_id가 있으면 그 보기 필터를 요청 필터보다 먼저 적용합니다. "
+        "q는 제목만 찾습니다."
+    ),
     response=RecordQueryResponseSchema,
     auth=jwt_auth,
 )

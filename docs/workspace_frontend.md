@@ -5,12 +5,12 @@ audience: frontend
 
 # 워크스페이스 API
 
-KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다. 화면의 영역은 데이터베이스 slug와 같습니다. 인증은 기존 JWT입니다. 페이지 아이콘, 서식 블록, 댓글, 활동, 보드·캘린더·갤러리, 템플릿, 휴지통은 [workspace_page_frontend.md](workspace_page_frontend.md)입니다.
+KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다. 화면의 데이터베이스는 slug로 구분하고, 사이드바 페이지는 `section_slug`로 묶습니다. 인증은 기존 JWT입니다. 기본 페이지의 속성 표는 [koc_pages_frontend.md](koc_pages_frontend.md)입니다. 레코드 본문, 댓글, 활동, 보드·캘린더·갤러리, 템플릿, 휴지통은 [workspace_page_frontend.md](workspace_page_frontend.md)입니다.
 
 ## 유저 플로우
 
 1. 로그인 후 `GET /api/v1/workspace`로 속한 공간을 가져옵니다. 시드 공간의 slug는 `koc`입니다.
-2. `GET /api/v1/workspace/database`로 사이드바 영역을 그립니다. `position` 오름차순입니다.
+2. `GET /api/v1/workspace/database`로 사이드바를 그립니다. 응답은 `position`, `id` 오름차순입니다. `section_slug`가 같은 항목을 한 페이지로 모으고, 페이지 순서는 그 그룹의 가장 작은 `position`입니다. 속성 표는 [koc_pages_frontend.md](koc_pages_frontend.md)입니다.
 3. 영역을 열면 `GET /api/v1/workspace/database/{database_id}`의 `properties`와 `views`로 표 머리와 탭을 만듭니다.
 4. 탭의 `filters`와 `sorts`를 `POST /api/v1/workspace/query`에 넣거나, `view_id`만 넣습니다. `내 담당` 보기는 `owner = me`라서 서버가 로그인 사용자로 바꿉니다.
 5. 행을 누르면 `GET /api/v1/workspace/record/{record_id}`로 값과 블록을 엽니다.
@@ -18,6 +18,8 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 7. 통합대장은 데이터베이스를 비운 `POST /api/v1/workspace/query`입니다. 각 행의 `database_slug`로 영역을 구분합니다.
 
 ## 영역
+
+아래 여섯 개는 `python manage.py seed_koc_workspace`가 만드는 스킬용 데이터베이스입니다. `section`은 빈 문자열입니다. CSV 기본 페이지는 [koc_pages_frontend.md](koc_pages_frontend.md)입니다.
 
 | slug | 화면 | 주요 속성 |
 |------|------|-----------|
@@ -28,18 +30,7 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 | `sales` | 영업 / 견적 / A/S | `kind`(견적/A/S), `status`, `owner`, `due_date`, `amount` |
 | `docs` | 문서 및 사내규정 | `status`, `category`, `owner`, `due_date`, 블록 본문 |
 
-`title`은 모든 데이터베이스의 제목 속성입니다. 응답 `title`과 `values.title`은 같습니다. 상태 이름은 `진행 중`, `완료`, `대기`, `접수`처럼 옵션 `name`입니다. 담당 `owner`는 사용자 id 배열입니다.
-
-`python manage.py seed_koc_pages`가 만드는 데이터베이스는 `section`으로 페이지에 묶입니다. 통합관리대장은 데이터베이스를 비운 조회입니다. 임직원·과제·거래처 연결은 `relation`이고, 읽기 값은 `{id, title, database_id, database_slug}`입니다.
-
-| section_slug | 페이지 | 데이터베이스 |
-|--------------|--------|----------------|
-| `hr` | 인사 / 근태 관리 | `employees` 임직원, `attendance` 근무 기록, `leave` 휴가, `trip` 출장 |
-| `daily` | 일일 업무 관리 | `tasks` 일일 업무 |
-| `gov` | 정부과제 및 거래처 | `projects` 정부과제, `expenses` 과제 지출, `clients` 거래처 |
-| `purchase` | 구매 / 발주 / 재고 | `inventory` 재고 |
-| `sales` | 영업 / 견적 / A/S | `quotes` 견적, `after_service` A/S |
-| `docs` | 문서 및 사내규정 | `company_docs` 회사 문서, `policies` 사내규정 |
+`title`은 모든 데이터베이스의 제목 속성입니다. 응답 `title`과 `values.title`은 같습니다. 상태 이름은 `진행 중`, `완료`, `대기`, `접수`처럼 옵션 `name`입니다. 이 여섯 영역의 담당 `owner`는 사용자 id 배열입니다. CSV 페이지의 임직원 칸은 레코드 관계입니다.
 
 ## 공통
 
@@ -67,7 +58,7 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 
 ## 데이터베이스
 
-`GET /database` 목록. `id`, `workspace_id`, `name`, `slug`, `description`, `icon`, `section`, `section_slug`, `position`, `created_at`, `updated_at`. `section`은 페이지 이름이고 `section_slug`는 페이지 키입니다. 페이지에 속하지 않으면 둘 다 빈 문자열입니다.
+`GET /database` 목록. `id`, `workspace_id`, `name`, `slug`, `description`, `icon`, `section`, `section_slug`, `position`, `created_at`, `updated_at`. `section`은 페이지 이름이고 `section_slug`는 페이지 키입니다. 묶음이 없는 데이터베이스는 둘 다 빈 문자열입니다. 같은 `section_slug`를 한 사이드바 그룹으로 그립니다.
 
 `POST /database` 생성. 201. 제목 속성을 함께 만듭니다. 상세 응답에 `properties`, `views`가 있습니다.
 
@@ -155,7 +146,7 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 
 `PATCH /view/{view_id}` 보낸 키만 바꿉니다. `DELETE /view/{view_id}`.
 
-시드 보기는 모두 `table`입니다. 이름은 `전체`, `진행중`, `내 담당`, `완료`입니다.
+`seed_koc_workspace` 보기는 `table`이고 이름은 `전체`, `진행중`, `내 담당`, `완료`입니다. `seed_koc_pages` 보기는 `전체` 표 하나입니다.
 
 ## 조회
 
@@ -232,7 +223,7 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 
 ## 구현 체크리스트
 
-- 사이드바 영역을 `GET /database` slug로 연결한다.
+- 사이드바는 `section_slug`로 묶고, 데이터베이스는 `slug`로 연다. 속성 표는 [koc_pages_frontend.md](koc_pages_frontend.md)다.
 - 표 헤더는 `properties`의 `name`, `slug`, `type`, `config.options`를 쓴다.
 - 탭은 `views`다. 탭을 누르면 `view_id` 또는 그 `filters`를 조회 본문에 넣는다.
 - 통합대장은 `database_slug` 없이 조회하고 `database_name`으로 분류 칸을 채운다.

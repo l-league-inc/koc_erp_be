@@ -5,7 +5,7 @@ audience: frontend
 
 # 워크스페이스 페이지
 
-레코드 한 건을 노션 페이지처럼 열 때 쓰는 계약입니다. 데이터베이스와 조회 기본은 [workspace_frontend.md](workspace_frontend.md)입니다. 기본 경로는 `/api/v1/workspace`이고 인증은 JWT입니다.
+레코드 한 건을 노션 페이지처럼 열 때 쓰는 계약입니다. 사이드바 페이지 묶음과 데이터베이스 속성은 [koc_pages_frontend.md](koc_pages_frontend.md)이고, 조회 기본은 [workspace_frontend.md](workspace_frontend.md)입니다. 기본 경로는 `/api/v1/workspace`이고 인증은 JWT입니다.
 
 ## 유저 플로우
 

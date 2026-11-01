@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from ninja import Schema
+from ninja import Field, Schema
 
 
 class WorkspaceResponseSchema(Schema):
@@ -45,15 +45,17 @@ class ViewResponseSchema(Schema):
 
 
 class DatabaseResponseSchema(Schema):
+    """사이드바 데이터베이스. section_slug가 같으면 한 페이지입니다."""
+
     id: int
     workspace_id: int
-    name: str
-    slug: str
-    description: str
-    icon: str
-    section: str
-    section_slug: str
-    position: int
+    name: str = Field(description="데이터베이스 이름")
+    slug: str = Field(description="데이터베이스 키")
+    description: str = Field(description="설명")
+    icon: str = Field(description="아이콘 키")
+    section: str = Field(description="페이지 이름. 묶음이 없으면 빈 문자열입니다.")
+    section_slug: str = Field(description="페이지 키. 묶음이 없으면 빈 문자열입니다.")
+    position: int = Field(description="정렬 순서")
     created_at: datetime
     updated_at: datetime
 
@@ -75,10 +77,12 @@ class BlockResponseSchema(Schema):
 
 
 class RecordResponseSchema(Schema):
+    """레코드. 통합관리대장에서는 database_slug와 database_name으로 영역을 구분합니다."""
+
     id: int
     database_id: int
-    database_slug: str
-    database_name: str
+    database_slug: str = Field(description="데이터베이스 키")
+    database_name: str = Field(description="데이터베이스 이름")
     title: str
     icon: str
     values: dict[str, Any]

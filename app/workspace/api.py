@@ -7,6 +7,7 @@ from api.security import jwt_auth
 from workspace.inbound import (
     BlockCreateSchema,
     BlockUpdateSchema,
+    CommentCreateSchema,
     DatabaseCreateSchema,
     DatabaseUpdateSchema,
     PropertyCreateSchema,
@@ -14,18 +15,24 @@ from workspace.inbound import (
     RecordCreateSchema,
     RecordQuerySchema,
     RecordUpdateSchema,
+    TemplateUpdateSchema,
+    TemplateWriteSchema,
     ViewUpdateSchema,
     ViewWriteSchema,
     WorkspaceCreateSchema,
     WorkspaceUpdateSchema,
 )
 from workspace.outbound import (
+    ActivityResponseSchema,
     BlockResponseSchema,
+    CommentResponseSchema,
     DatabaseDetailResponseSchema,
     DatabaseResponseSchema,
     PropertyResponseSchema,
     RecordDetailResponseSchema,
     RecordQueryResponseSchema,
+    TemplateResponseSchema,
+    TrashRecordResponseSchema,
     ViewResponseSchema,
     WorkspaceMemberResponseSchema,
     WorkspaceResponseSchema,
@@ -33,19 +40,27 @@ from workspace.outbound import (
 from workspace.utils import (
     activity_source,
     create_block,
+    create_comment,
     create_database,
     create_property,
     create_record,
+    create_template,
     create_view,
     create_workspace,
     delete_block,
+    delete_comment,
     delete_database,
     delete_property,
     delete_record,
+    delete_template,
     delete_view,
     delete_workspace,
     get_database,
     get_record,
+    list_activities,
+    list_comments,
+    list_templates,
+    list_trash,
     list_workspaces,
     query_records,
     serialize_block,
@@ -55,10 +70,12 @@ from workspace.utils import (
     serialize_view,
     serialize_workspace,
     list_members,
+    restore_record,
     update_block,
     update_database,
     update_property,
     update_record,
+    update_template,
     update_view,
     update_workspace,
     accessible_databases,
@@ -295,7 +312,7 @@ async def query_record_api(request, payload: RecordQuerySchema):
 @router.post(
     "/database/{database_id}/record",
     summary="[C] 레코드 생성",
-    description="데이터베이스에 레코드를 작성합니다. values의 키는 속성 slug입니다.",
+    description="데이터베이스에 레코드를 작성합니다. values의 키는 속성 slug입니다. template_id가 있으면 그 값과 블록을 먼저 복사합니다.",
     response={201: RecordDetailResponseSchema},
     auth=jwt_auth,
 )
@@ -303,7 +320,7 @@ async def create_record_api(request, database_id: int, payload: RecordCreateSche
     record = await sync_to_async(create_record)(
         request.auth,
         database_id,
-        _dump(payload),
+        _dump(payload, exclude_unset=True),
         activity_source(request),
     )
     return 201, record
@@ -344,7 +361,7 @@ async def update_record_api(request, record_id: int, payload: RecordUpdateSchema
 @router.delete(
     "/record/{record_id}",
     summary="[C] 레코드 삭제",
-    description="레코드를 소프트 삭제합니다.",
+    description="레코드를 휴지통으로 옮깁니다. 값과 블록은 남겨 두며 복원할 수 있습니다.",
     response={204: None},
     auth=jwt_auth,
 )
@@ -413,6 +430,127 @@ async def update_block_api(request, block_id: int, payload: BlockUpdateSchema):
 async def delete_block_api(request, block_id: int):
     await sync_to_async(delete_block)(request.auth, block_id, activity_source(request))
     return 204, None
+
+
+@router.get(
+    "/database/{database_id}/template",
+    summary="[C] 템플릿 목록 조회",
+    description="데이터베이스 템플릿 목록을 조회합니다.",
+    response=list[TemplateResponseSchema],
+    auth=jwt_auth,
+)
+async def list_template_api(request, database_id: int):
+    return await sync_to_async(list_templates)(request.auth, database_id)
+
+
+@router.post(
+    "/database/{database_id}/template",
+    summary="[C] 템플릿 생성",
+    description="새 레코드에 복사할 제목, 값, 블록을 저장합니다.",
+    response={201: TemplateResponseSchema},
+    auth=jwt_auth,
+)
+async def create_template_api(request, database_id: int, payload: TemplateWriteSchema):
+    template = await sync_to_async(create_template)(
+        request.auth, database_id, _dump(payload)
+    )
+    return 201, template
+
+
+@router.patch(
+    "/template/{template_id}",
+    summary="[C] 템플릿 수정",
+    description="템플릿 이름, 값, 블록을 수정합니다.",
+    response=TemplateResponseSchema,
+    auth=jwt_auth,
+)
+async def update_template_api(request, template_id: int, payload: TemplateUpdateSchema):
+    template = await sync_to_async(update_template)(
+        request.auth, template_id, _dump(payload, exclude_unset=True)
+    )
+    return template
+
+
+@router.delete(
+    "/template/{template_id}",
+    summary="[C] 템플릿 삭제",
+    description="템플릿을 소프트 삭제합니다.",
+    response={204: None},
+    auth=jwt_auth,
+)
+async def delete_template_api(request, template_id: int):
+    await sync_to_async(delete_template)(request.auth, template_id)
+    return 204, None
+
+
+@router.get(
+    "/record/{record_id}/activity",
+    summary="[C] 활동 이력 조회",
+    description="레코드 생성·수정 스냅샷을 최근 50건 조회합니다.",
+    response=list[ActivityResponseSchema],
+    auth=jwt_auth,
+)
+async def list_activity_api(request, record_id: int):
+    return await sync_to_async(list_activities)(request.auth, record_id)
+
+
+@router.get(
+    "/record/{record_id}/comment",
+    summary="[C] 댓글 목록 조회",
+    description="레코드 댓글을 오래된 순으로 조회합니다.",
+    response=list[CommentResponseSchema],
+    auth=jwt_auth,
+)
+async def list_comment_api(request, record_id: int):
+    return await sync_to_async(list_comments)(request.auth, record_id)
+
+
+@router.post(
+    "/record/{record_id}/comment",
+    summary="[C] 댓글 작성",
+    description="레코드에 댓글 또는 한 단계 답글을 작성합니다.",
+    response={201: CommentResponseSchema},
+    auth=jwt_auth,
+)
+async def create_comment_api(request, record_id: int, payload: CommentCreateSchema):
+    comment = await sync_to_async(create_comment)(
+        request.auth, record_id, _dump(payload, exclude_unset=True)
+    )
+    return 201, comment
+
+
+@router.delete(
+    "/comment/{comment_id}",
+    summary="[C] 댓글 삭제",
+    description="댓글을 소프트 삭제합니다. 작성자, 소유자, 관리자만 삭제할 수 있습니다.",
+    response={204: None},
+    auth=jwt_auth,
+)
+async def delete_comment_api(request, comment_id: int):
+    await sync_to_async(delete_comment)(request.auth, comment_id)
+    return 204, None
+
+
+@router.post(
+    "/record/{record_id}/restore",
+    summary="[C] 레코드 복원",
+    description="휴지통의 레코드를 복원합니다. 값과 블록은 삭제 전에 남겨 둔 것을 그대로 되돌립니다.",
+    response=RecordDetailResponseSchema,
+    auth=jwt_auth,
+)
+async def restore_record_api(request, record_id: int):
+    return await sync_to_async(restore_record)(request.auth, record_id)
+
+
+@router.get(
+    "/{workspace_id}/trash",
+    summary="[C] 휴지통 조회",
+    description="워크스페이스에서 지운 레코드 최근 100건을 조회합니다.",
+    response=list[TrashRecordResponseSchema],
+    auth=jwt_auth,
+)
+async def list_trash_api(request, workspace_id: int):
+    return await sync_to_async(list_trash)(request.auth, workspace_id)
 
 
 @router.get(

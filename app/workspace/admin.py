@@ -3,10 +3,12 @@ from django.contrib import admin
 from workspace.models import (
     Block,
     Database,
+    DatabaseTemplate,
     Property,
     PropertyValue,
     Record,
     RecordActivity,
+    RecordComment,
     RelationLink,
     View,
     Workspace,
@@ -69,3 +71,13 @@ class ViewAdmin(admin.ModelAdmin):
 class RecordActivityAdmin(admin.ModelAdmin):
     list_display = ["id", "record", "action", "source", "actor", "created_at"]
     list_filter = ["action", "source"]
+
+
+@admin.register(RecordComment)
+class RecordCommentAdmin(admin.ModelAdmin):
+    list_display = ["id", "record", "author", "parent", "created_at"]
+
+
+@admin.register(DatabaseTemplate)
+class DatabaseTemplateAdmin(admin.ModelAdmin):
+    list_display = ["id", "database", "name", "position"]

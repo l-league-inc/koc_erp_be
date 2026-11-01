@@ -11,10 +11,12 @@ from ninja.errors import HttpError
 from workspace.models import (
     Block,
     Database,
+    DatabaseTemplate,
     Property,
     PropertyValue,
     Record,
     RecordActivity,
+    RecordComment,
     RelationLink,
     View,
     Workspace,
@@ -38,6 +40,16 @@ OPTION_TYPES = {
     Property.Type.MULTI_SELECT,
 }
 FILTER_OPS = {"eq", "neq", "contains", "in", "gt", "gte", "lt", "lte", "is_empty"}
+RICH_TEXT_ANNOTATIONS = {"bold", "italic", "strikethrough", "code", "color"}
+BOOL_ANNOTATIONS = {"bold", "italic", "strikethrough", "code"}
+GROUP_PROPERTY_TYPES = {
+    Property.Type.SELECT,
+    Property.Type.STATUS,
+    Property.Type.MULTI_SELECT,
+}
+COVER_PROPERTY_TYPES = {Property.Type.FILES, Property.Type.URL}
+ACTIVITY_LIMIT = 50
+TRASH_LIMIT = 100
 
 
 def activity_source(request) -> str:
@@ -265,13 +277,47 @@ def export_value(stored: PropertyValue) -> Any:
     return stored.text_value
 
 
+def _relation_cards(record_ids: list[int]) -> list[dict[str, Any]]:
+    if not record_ids:
+        return []
+    rows = Record.objects.filter(id__in=record_ids).select_related("database")
+    by_id = {row.id: row for row in rows}
+    cards: list[dict[str, Any]] = []
+    for record_id in record_ids:
+        row = by_id.get(record_id)
+        if row is None:
+            continue
+        cards.append(
+            {
+                "id": row.id,
+                "title": row.title,
+                "database_id": row.database_id,
+                "database_slug": row.database.slug,
+            }
+        )
+    return cards
+
+
 def export_values(record: Record) -> dict[str, Any]:
-    values = (
+    stored = (
         PropertyValue.objects.filter(record=record)
         .select_related("property")
         .order_by("property__position", "property_id")
     )
-    return {item.property.slug: export_value(item) for item in values}
+    values: dict[str, Any] = {}
+    for item in stored:
+        value = export_value(item)
+        if item.property.type == Property.Type.RELATION:
+            ids = value if isinstance(value, list) else []
+            value = _relation_cards(
+                [
+                    record_id
+                    for record_id in ids
+                    if isinstance(record_id, int) and not isinstance(record_id, bool)
+                ]
+            )
+        values[item.property.slug] = value
+    return values
 
 
 def serialize_record(record: Record, *, include_blocks: bool = False) -> dict[str, Any]:
@@ -281,6 +327,7 @@ def serialize_record(record: Record, *, include_blocks: bool = False) -> dict[st
         "database_slug": record.database.slug,
         "database_name": record.database.name,
         "title": record.title,
+        "icon": record.icon,
         "values": export_values(record),
         "created_by_id": record.created_by_id,
         "last_edited_by_id": record.last_edited_by_id,
@@ -534,15 +581,101 @@ def _validate_block_type(block_type: str) -> str:
     return block_type
 
 
+def _validate_rich_text(items: Any, workspace_id: int) -> None:
+    if not isinstance(items, list) or not items:
+        raise HttpError(400, "rich_text는 한 항목 이상이어야 합니다.")
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+            raise HttpError(400, "rich_text 항목에는 문자열 text가 필요합니다.")
+        annotations = item.get("annotations")
+        if annotations is not None:
+            if not isinstance(annotations, dict):
+                raise HttpError(400, "annotations는 객체여야 합니다.")
+            if set(annotations) - RICH_TEXT_ANNOTATIONS:
+                raise HttpError(400, "지원하지 않는 서식입니다.")
+            for key in BOOL_ANNOTATIONS:
+                if key in annotations and not isinstance(annotations[key], bool):
+                    raise HttpError(400, "서식 값은 true 또는 false여야 합니다.")
+            if "color" in annotations and not isinstance(annotations["color"], str):
+                raise HttpError(400, "색은 문자열이어야 합니다.")
+        href = item.get("href")
+        if href is not None and (
+            not isinstance(href, str) or not href.startswith(("http://", "https://"))
+        ):
+            raise HttpError(400, "링크는 http:// 또는 https://로 시작해야 합니다.")
+        mention = item.get("mention")
+        if mention is None:
+            continue
+        if not isinstance(mention, dict):
+            raise HttpError(400, "멘션 형식이 올바르지 않습니다.")
+        mention_type = mention.get("type")
+        if mention_type == "user":
+            user_id = mention.get("user_id")
+            if isinstance(user_id, bool) or not isinstance(user_id, int):
+                raise HttpError(400, "멘션 사용자는 id여야 합니다.")
+            if not WorkspaceMember.objects.filter(
+                workspace_id=workspace_id, user_id=user_id
+            ).exists():
+                raise HttpError(400, "같은 워크스페이스 멤버만 멘션할 수 있습니다.")
+        elif mention_type == "record":
+            record_id = mention.get("record_id")
+            if isinstance(record_id, bool) or not isinstance(record_id, int):
+                raise HttpError(400, "멘션 레코드는 id여야 합니다.")
+            if not Record.objects.filter(
+                id=record_id, database__workspace_id=workspace_id
+            ).exists():
+                raise HttpError(400, "멘션할 수 없는 레코드입니다.")
+        else:
+            raise HttpError(400, "멘션 타입은 user 또는 record입니다.")
+
+
+def _require_text_or_rich_text(content: dict, workspace_id: int) -> None:
+    if "rich_text" in content:
+        _validate_rich_text(content.get("rich_text"), workspace_id)
+        return
+    if "text" in content and not isinstance(content.get("text"), str):
+        raise HttpError(400, "블록 본문은 문자열이어야 합니다.")
+
+
+def validate_block_content(block_type: str, content: Any, workspace_id: int) -> dict:
+    if not isinstance(content, dict):
+        raise HttpError(400, "블록 내용은 객체여야 합니다.")
+    if block_type == Block.Type.DIVIDER:
+        return content
+    if block_type == Block.Type.IMAGE:
+        url = content.get("url")
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            raise HttpError(400, "이미지 URL은 http:// 또는 https://로 시작해야 합니다.")
+        if "rich_text" in content or "text" in content:
+            _require_text_or_rich_text(content, workspace_id)
+        return content
+    if block_type == Block.Type.CODE:
+        if not isinstance(content.get("text"), str):
+            raise HttpError(400, "코드 블록에는 text가 필요합니다.")
+        if "language" in content and not isinstance(content.get("language"), str):
+            raise HttpError(400, "코드 언어는 문자열이어야 합니다.")
+        return content
+    if block_type == Block.Type.TO_DO and "checked" in content and not isinstance(
+        content.get("checked"), bool
+    ):
+        raise HttpError(400, "할 일 체크는 true 또는 false여야 합니다.")
+    if block_type == Block.Type.CALLOUT and "icon" in content and not isinstance(
+        content.get("icon"), str
+    ):
+        raise HttpError(400, "콜아웃 아이콘은 문자열이어야 합니다.")
+    _require_text_or_rich_text(content, workspace_id)
+    return content
+
+
 def create_block_tree(record: Record, blocks: list[dict], parent: Block | None) -> None:
+    workspace_id = record.database.workspace_id
     for index, data in enumerate(blocks or []):
-        content = data.get("content") or {}
-        if not isinstance(content, dict):
-            raise HttpError(400, "블록 내용은 객체여야 합니다.")
+        block_type = _validate_block_type(str(data.get("type") or ""))
+        content = validate_block_content(block_type, data.get("content") or {}, workspace_id)
         created = Block.objects.create(
             record=record,
             parent=parent,
-            type=_validate_block_type(str(data.get("type") or "")),
+            type=block_type,
             content=content,
             position=int(data.get("position", index)),
         )
@@ -716,6 +849,8 @@ def delete_database_object(database: Database) -> None:
         prop.delete()
     for view in View.objects.filter(database=database):
         view.delete()
+    for template in DatabaseTemplate.objects.filter(database=database):
+        template.delete()
     database.delete()
 
 
@@ -822,6 +957,40 @@ def _normalize_filter_items(items: Any) -> list[dict[str, Any]]:
     return cleaned
 
 
+def _property_by_slug(database: Database, slug: Any) -> Property | None:
+    if not isinstance(slug, str) or not slug:
+        return None
+    return database.properties.filter(slug=slug).first()
+
+
+def validate_view_config(database: Database, view_type: str, config: Any) -> dict:
+    if config is None:
+        config = {}
+    if not isinstance(config, dict):
+        raise HttpError(400, "보기 설정은 객체여야 합니다.")
+    if view_type == View.Type.BOARD:
+        slug = config.get("group_by")
+        if not isinstance(slug, str) or not slug:
+            raise HttpError(400, "보드 보기에는 group_by가 필요합니다.")
+        prop = _property_by_slug(database, slug)
+        if prop is None or prop.type not in GROUP_PROPERTY_TYPES:
+            raise HttpError(400, "보드는 선택, 상태, 다중 선택 속성으로만 묶을 수 있습니다.")
+    elif view_type == View.Type.CALENDAR:
+        slug = config.get("date_property")
+        if not isinstance(slug, str) or not slug:
+            raise HttpError(400, "캘린더 보기에는 date_property가 필요합니다.")
+        prop = _property_by_slug(database, slug)
+        if prop is None or prop.type != Property.Type.DATE:
+            raise HttpError(400, "캘린더는 날짜 속성만 쓸 수 있습니다.")
+    elif view_type == View.Type.GALLERY:
+        cover = config.get("cover_property")
+        if cover not in (None, ""):
+            prop = _property_by_slug(database, cover)
+            if prop is None or prop.type not in COVER_PROPERTY_TYPES:
+                raise HttpError(400, "갤러리 커버는 파일 또는 URL 속성만 쓸 수 있습니다.")
+    return config
+
+
 def _normalize_sort_items(items: Any) -> list[dict[str, Any]]:
     if items is None:
         return []
@@ -850,7 +1019,7 @@ def create_view(user, database_id: int, data: dict[str, Any]) -> dict[str, Any]:
         type=view_type,
         filters=_normalize_filter_items(data.get("filters")),
         sorts=_normalize_sort_items(data.get("sorts")),
-        config=data.get("config") or {},
+        config=validate_view_config(database, view_type, data.get("config") or {}),
         position=data.get("position") or 0,
     )
     if not view.name:
@@ -865,16 +1034,20 @@ def update_view(user, view_id: int, data: dict[str, Any]) -> dict[str, Any]:
         view.name = str(data["name"]).strip()
         if not view.name:
             raise HttpError(400, "보기 이름이 필요합니다.")
+    next_type = view.type
     if data.get("type") is not None:
         if data["type"] not in View.Type.values:
             raise HttpError(400, "지원하지 않는 보기 타입입니다.")
-        view.type = data["type"]
+        next_type = data["type"]
+    next_config = view.config or {}
+    if data.get("config") is not None:
+        next_config = data["config"]
+    view.type = next_type
+    view.config = validate_view_config(view.database, next_type, next_config)
     if "filters" in data and data["filters"] is not None:
         view.filters = _normalize_filter_items(data["filters"])
     if "sorts" in data and data["sorts"] is not None:
         view.sorts = _normalize_sort_items(data["sorts"])
-    if data.get("config") is not None:
-        view.config = data["config"]
     if data.get("position") is not None:
         view.position = data["position"]
     view.save()
@@ -900,19 +1073,33 @@ def delete_record_object(record: Record) -> None:
 @transaction.atomic
 def create_record(user, database_id: int, data: dict[str, Any], source: str) -> dict[str, Any]:
     database = get_database(user, database_id)
-    title = str(data.get("title") or "").strip()
+    template = None
+    if data.get("template_id") is not None:
+        template = get_template(user, int(data["template_id"]))
+        if template.database_id != database.id:
+            raise HttpError(400, "템플릿이 데이터베이스와 맞지 않습니다.")
+    title_source = data.get("title")
+    if title_source is None and template is not None:
+        title_source = template.title
+    title = str(title_source or "").strip()
     if not title:
         raise HttpError(400, "제목이 필요합니다.")
     record = Record.objects.create(
         database=database,
         title=title,
+        icon=str(data.get("icon") or ""),
         created_by=user,
         last_edited_by=user,
     )
-    values = dict(data.get("values") or {})
+    values = dict(template.values if template is not None else {})
+    if data.get("values") is not None:
+        values.update(data["values"])
     values[title_property(database).slug] = title
     apply_values(record, values)
-    create_block_tree(record, data.get("blocks") or [], None)
+    blocks = list(template.blocks if template is not None else [])
+    if "blocks" in data and data.get("blocks") is not None:
+        blocks = data["blocks"]
+    create_block_tree(record, blocks, None)
     record.save(update_fields=["title", "last_edited_by", "updated_at"])
     after = _snapshot(record)
     log_activity(record, user, RecordActivity.Action.CREATED, {}, after, source)
@@ -934,6 +1121,8 @@ def update_record(user, record_id: int, data: dict[str, Any], source: str) -> di
         apply_values(record, values)
     if data.get("blocks") is not None:
         replace_blocks(record, data["blocks"])
+    if data.get("icon") is not None:
+        record.icon = str(data["icon"])
     record.last_edited_by = user
     record.save(update_fields=["title", "last_edited_by", "updated_at"])
     after = _snapshot(record)
@@ -944,7 +1133,7 @@ def update_record(user, record_id: int, data: dict[str, Any], source: str) -> di
 @transaction.atomic
 def delete_record(user, record_id: int) -> None:
     record = get_record(user, record_id)
-    delete_record_object(record)
+    record.delete()
 
 
 def _block_parent(user, record: Record, parent_id: int | None) -> Block | None:
@@ -968,13 +1157,14 @@ def _reject_cycle(block: Block, parent: Block | None) -> None:
 def create_block(user, record_id: int, data: dict[str, Any], source: str) -> dict[str, Any]:
     record = get_record(user, record_id)
     before = _snapshot(record)
-    content = data.get("content") or {}
-    if not isinstance(content, dict):
-        raise HttpError(400, "블록 내용은 객체여야 합니다.")
+    block_type = _validate_block_type(str(data.get("type") or ""))
+    content = validate_block_content(
+        block_type, data.get("content") or {}, record.database.workspace_id
+    )
     block = Block.objects.create(
         record=record,
         parent=_block_parent(user, record, data.get("parent_id")),
-        type=_validate_block_type(str(data.get("type") or "")),
+        type=block_type,
         content=content,
         position=data.get("position") or 0,
     )
@@ -992,9 +1182,9 @@ def update_block(user, block_id: int, data: dict[str, Any], source: str) -> dict
     if data.get("type") is not None:
         block.type = _validate_block_type(str(data["type"]))
     if data.get("content") is not None:
-        if not isinstance(data["content"], dict):
-            raise HttpError(400, "블록 내용은 객체여야 합니다.")
-        block.content = data["content"]
+        block.content = validate_block_content(
+            block.type, data["content"], record.database.workspace_id
+        )
     if data.get("position") is not None:
         block.position = data["position"]
     if "parent_id" in data:
@@ -1233,3 +1423,243 @@ def query_records(user, data: dict[str, Any]) -> dict[str, Any]:
         "page_size": page_size,
         "data": [serialize_record(row) for row in rows],
     }
+
+
+def _author_name(user) -> str:
+    if user is None:
+        return ""
+    return user.name or ""
+
+
+def serialize_activity(activity: RecordActivity) -> dict[str, Any]:
+    return {
+        "id": activity.id,
+        "action": activity.action,
+        "source": activity.source,
+        "actor_id": activity.actor_id,
+        "actor_name": _author_name(activity.actor),
+        "changes": activity.changes or {},
+        "created_at": activity.created_at,
+    }
+
+
+def list_activities(user, record_id: int) -> list[dict[str, Any]]:
+    record = get_record(user, record_id)
+    rows = (
+        RecordActivity.objects.filter(record=record)
+        .select_related("actor")
+        .order_by("-id")[:ACTIVITY_LIMIT]
+    )
+    return [serialize_activity(row) for row in rows]
+
+
+def serialize_comment(comment: RecordComment) -> dict[str, Any]:
+    return {
+        "id": comment.id,
+        "record_id": comment.record_id,
+        "parent_id": comment.parent_id,
+        "author_id": comment.author_id,
+        "author_name": _author_name(comment.author),
+        "body": comment.body,
+        "created_at": comment.created_at,
+        "updated_at": comment.updated_at,
+    }
+
+
+def get_comment(user, comment_id: int) -> RecordComment:
+    comment = (
+        RecordComment.objects.select_related(
+            "record", "record__database", "record__database__workspace", "author"
+        )
+        .filter(id=comment_id)
+        .first()
+    )
+    if comment is None:
+        raise HttpError(404, "댓글을 찾을 수 없습니다.")
+    if not _membership_exists(user, comment.record.database.workspace_id):
+        raise HttpError(403, "워크스페이스에 접근할 수 없습니다.")
+    return comment
+
+
+def list_comments(user, record_id: int) -> list[dict[str, Any]]:
+    record = get_record(user, record_id)
+    rows = (
+        RecordComment.objects.filter(record=record)
+        .select_related("author")
+        .order_by("id")
+    )
+    return [serialize_comment(row) for row in rows]
+
+
+@transaction.atomic
+def create_comment(user, record_id: int, data: dict[str, Any]) -> dict[str, Any]:
+    record = get_record(user, record_id)
+    body = str(data.get("body") or "").strip()
+    if not body:
+        raise HttpError(400, "댓글 내용이 필요합니다.")
+    parent = None
+    if data.get("parent_id") is not None:
+        parent = get_comment(user, int(data["parent_id"]))
+        if parent.record_id != record.id:
+            raise HttpError(400, "답글은 같은 레코드의 댓글에만 달 수 있습니다.")
+        if parent.parent_id is not None:
+            raise HttpError(400, "답글에는 다시 답글을 달 수 없습니다.")
+    comment = RecordComment.objects.create(
+        record=record,
+        author=user,
+        parent=parent,
+        body=body,
+    )
+    return serialize_comment(comment)
+
+
+@transaction.atomic
+def delete_comment(user, comment_id: int) -> None:
+    comment = get_comment(user, comment_id)
+    membership = get_membership(user, comment.record.database.workspace_id)
+    if comment.author_id != user.id and membership.role not in {
+        WorkspaceMember.Role.OWNER,
+        WorkspaceMember.Role.ADMIN,
+    }:
+        raise HttpError(403, "댓글을 삭제할 권한이 없습니다.")
+    for reply in RecordComment.objects.filter(parent=comment):
+        reply.delete()
+    comment.delete()
+
+
+def serialize_template(template: DatabaseTemplate) -> dict[str, Any]:
+    return {
+        "id": template.id,
+        "database_id": template.database_id,
+        "name": template.name,
+        "title": template.title,
+        "values": template.values or {},
+        "blocks": template.blocks or [],
+        "position": template.position,
+        "created_at": template.created_at,
+        "updated_at": template.updated_at,
+    }
+
+
+def get_template(user, template_id: int) -> DatabaseTemplate:
+    template = (
+        DatabaseTemplate.objects.select_related("database", "database__workspace")
+        .filter(id=template_id)
+        .first()
+    )
+    if template is None:
+        raise HttpError(404, "템플릿을 찾을 수 없습니다.")
+    if not _membership_exists(user, template.database.workspace_id):
+        raise HttpError(403, "워크스페이스에 접근할 수 없습니다.")
+    return template
+
+
+def _clean_template_payload(database: Database, data: dict[str, Any], *, partial: bool) -> dict[str, Any]:
+    cleaned: dict[str, Any] = {}
+    if not partial or data.get("name") is not None:
+        name = str(data.get("name") or "").strip()
+        if not name:
+            raise HttpError(400, "템플릿 이름이 필요합니다.")
+        cleaned["name"] = name
+    if not partial or "title" in data:
+        cleaned["title"] = str(data.get("title") or "")
+    if not partial or data.get("values") is not None:
+        values = data.get("values") or {}
+        if not isinstance(values, dict):
+            raise HttpError(400, "템플릿 값은 객체여야 합니다.")
+        known = set(database.properties.values_list("slug", flat=True))
+        unknown = set(values) - known
+        if unknown:
+            raise HttpError(400, f"속성 {sorted(unknown)[0]}을 찾을 수 없습니다.")
+        cleaned["values"] = values
+    if not partial or data.get("blocks") is not None:
+        blocks = data.get("blocks") or []
+        if not isinstance(blocks, list):
+            raise HttpError(400, "템플릿 블록은 목록이어야 합니다.")
+        _validate_block_tree(blocks, database.workspace_id)
+        cleaned["blocks"] = blocks
+    if not partial or data.get("position") is not None:
+        cleaned["position"] = int(data.get("position") or 0)
+    return cleaned
+
+
+def _validate_block_tree(blocks: list, workspace_id: int) -> None:
+    for data in blocks:
+        if not isinstance(data, dict):
+            raise HttpError(400, "블록 내용은 객체여야 합니다.")
+        block_type = _validate_block_type(str(data.get("type") or ""))
+        validate_block_content(block_type, data.get("content") or {}, workspace_id)
+        children = data.get("children") or []
+        if not isinstance(children, list):
+            raise HttpError(400, "하위 블록은 목록이어야 합니다.")
+        _validate_block_tree(children, workspace_id)
+
+
+def list_templates(user, database_id: int) -> list[dict[str, Any]]:
+    database = get_database(user, database_id)
+    rows = database.templates.order_by("position", "id")
+    return [serialize_template(row) for row in rows]
+
+
+@transaction.atomic
+def create_template(user, database_id: int, data: dict[str, Any]) -> dict[str, Any]:
+    database = get_database(user, database_id)
+    cleaned = _clean_template_payload(database, data, partial=False)
+    template = DatabaseTemplate.objects.create(database=database, **cleaned)
+    return serialize_template(template)
+
+
+@transaction.atomic
+def update_template(user, template_id: int, data: dict[str, Any]) -> dict[str, Any]:
+    template = get_template(user, template_id)
+    cleaned = _clean_template_payload(template.database, data, partial=True)
+    for key, value in cleaned.items():
+        setattr(template, key, value)
+    template.save()
+    return serialize_template(template)
+
+
+@transaction.atomic
+def delete_template(user, template_id: int) -> None:
+    template = get_template(user, template_id)
+    template.delete()
+
+
+def list_trash(user, workspace_id: int) -> list[dict[str, Any]]:
+    get_membership(user, workspace_id)
+    rows = (
+        Record.all_objects.filter(
+            deleted_at__isnull=False,
+            database__workspace_id=workspace_id,
+            database__deleted_at__isnull=True,
+        )
+        .select_related("database")
+        .order_by("-deleted_at", "-id")[:TRASH_LIMIT]
+    )
+    return [
+        {
+            "id": row.id,
+            "title": row.title,
+            "icon": row.icon,
+            "database_id": row.database_id,
+            "database_slug": row.database.slug,
+            "database_name": row.database.name,
+            "deleted_at": row.deleted_at,
+        }
+        for row in rows
+    ]
+
+
+@transaction.atomic
+def restore_record(user, record_id: int) -> dict[str, Any]:
+    record = (
+        Record.all_objects.select_related("database", "database__workspace")
+        .filter(id=record_id, deleted_at__isnull=False)
+        .first()
+    )
+    if record is None or record.database.deleted_at is not None:
+        raise HttpError(404, "휴지통에서 레코드를 찾을 수 없습니다.")
+    if not _membership_exists(user, record.database.workspace_id):
+        raise HttpError(403, "워크스페이스에 접근할 수 없습니다.")
+    record.restore()
+    return serialize_record(record, include_blocks=True)

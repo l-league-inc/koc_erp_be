@@ -78,6 +78,7 @@ class RecordResponseSchema(Schema):
     database_slug: str
     database_name: str
     title: str
+    icon: str
     values: dict[str, Any]
     created_by_id: Optional[int]
     last_edited_by_id: Optional[int]
@@ -94,3 +95,46 @@ class RecordQueryResponseSchema(Schema):
     page: int
     page_size: int
     data: list[RecordResponseSchema]
+
+
+class ActivityResponseSchema(Schema):
+    id: int
+    action: str
+    source: str
+    actor_id: Optional[int]
+    actor_name: str
+    changes: dict
+    created_at: datetime
+
+
+class CommentResponseSchema(Schema):
+    id: int
+    record_id: int
+    parent_id: Optional[int]
+    author_id: Optional[int]
+    author_name: str
+    body: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class TemplateResponseSchema(Schema):
+    id: int
+    database_id: int
+    name: str
+    title: str
+    values: dict
+    blocks: list
+    position: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class TrashRecordResponseSchema(Schema):
+    id: int
+    title: str
+    icon: str
+    database_id: int
+    database_slug: str
+    database_name: str
+    deleted_at: datetime

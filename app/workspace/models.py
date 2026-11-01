@@ -152,6 +152,7 @@ class Record(CommonModel):
         help_text="데이터베이스",
     )
     title = models.CharField(max_length=300, help_text="제목")
+    icon = models.CharField(max_length=50, blank=True, default="", help_text="아이콘")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -256,6 +257,10 @@ class Block(CommonModel):
         TO_DO = ("to_do", "할 일")
         QUOTE = ("quote", "인용")
         DIVIDER = ("divider", "구분선")
+        TOGGLE = ("toggle", "토글")
+        CALLOUT = ("callout", "콜아웃")
+        CODE = ("code", "코드")
+        IMAGE = ("image", "이미지")
 
     record = models.ForeignKey(
         Record,
@@ -289,6 +294,8 @@ class View(CommonModel):
         TABLE = ("table", "표")
         BOARD = ("board", "보드")
         LIST = ("list", "목록")
+        CALENDAR = ("calendar", "캘린더")
+        GALLERY = ("gallery", "갤러리")
 
     database = models.ForeignKey(
         Database,
@@ -349,3 +356,59 @@ class RecordActivity(CommonModel):
         default=Source.USER,
         help_text="호출 출처",
     )
+
+
+class RecordComment(CommonModel):
+    """레코드 댓글입니다. 답글은 한 단계만 둡니다."""
+
+    record = models.ForeignKey(
+        Record,
+        on_delete=models.CASCADE,
+        related_name="comments",
+        help_text="레코드",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="workspace_record_comments",
+        help_text="작성자",
+    )
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="replies",
+        help_text="부모 댓글",
+    )
+    body = models.TextField(help_text="본문")
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return f"{self.record_id}:{self.id}"
+
+
+class DatabaseTemplate(CommonModel):
+    """새 레코드에 복사할 값과 블록입니다."""
+
+    database = models.ForeignKey(
+        Database,
+        on_delete=models.CASCADE,
+        related_name="templates",
+        help_text="데이터베이스",
+    )
+    name = models.CharField(max_length=100, help_text="이름")
+    title = models.CharField(max_length=300, blank=True, default="", help_text="기본 제목")
+    values = models.JSONField(default=dict, help_text="속성 값")
+    blocks = models.JSONField(default=list, help_text="블록")
+    position = models.PositiveIntegerField(default=0, help_text="정렬 순서")
+
+    class Meta:
+        ordering = ["position", "id"]
+
+    def __str__(self) -> str:
+        return self.name

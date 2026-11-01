@@ -47,6 +47,10 @@ audience: frontend
 - `POST /{workbot_id}/run` 지금 실행
 - `POST /run/{run_id}/confirm` 확인 대기 반영
 
+봇 항목은 `id`, `workspace_id`, `owner_id`, `name`, `description`, `instruction`, `spec`, `schedule`, `enabled`, `database_slug`, `estimated_minutes`, `next_run_at`, `last_run_at`, `created_at`, `updated_at`입니다. 생성 본문도 같은 필드에서 `id`와 실행 시각을 뺍니다. `workspace_id`와 `database_slug`는 생성에 필요합니다. 초안 응답은 `name`, `description`, `instruction`, `database_slug`, `schedule`, `estimated_minutes`, `spec`이고 저장되지 않습니다.
+
+실행 항목은 `id`, `workbot_id`, `status`(`success`/`waiting`/`failed`), `summary`, `record_ids`, `payload`, `created_at`입니다. 통계는 `active_count`, `month_run_count`, `success_rate`, `saved_minutes`입니다.
+
 절약 시간은 봇의 `estimated_minutes`에 이번 달 성공 횟수를 곱한 값입니다. 사이드바 뱃지는 `active_count`입니다. 알림의 읽지 않은 개수와는 다릅니다.
 
 없는 봇은 404, 다른 워크스페이스는 403, 일정 형식이 다르면 400입니다.

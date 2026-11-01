@@ -89,15 +89,39 @@ class BlockUpdateSchema(Schema):
 
 
 class RecordCreateSchema(Schema):
-    title: str
+    title: Optional[str] = None
+    icon: str = ""
+    template_id: Optional[int] = None
     values: dict[str, Any] = Field(default_factory=dict)
     blocks: list[BlockWriteSchema] = Field(default_factory=list)
 
 
 class RecordUpdateSchema(Schema):
     title: Optional[str] = None
+    icon: Optional[str] = None
     values: Optional[dict[str, Any]] = None
     blocks: Optional[list[BlockWriteSchema]] = None
+
+
+class CommentCreateSchema(Schema):
+    body: str
+    parent_id: Optional[int] = None
+
+
+class TemplateWriteSchema(Schema):
+    name: str
+    title: str = ""
+    values: dict[str, Any] = Field(default_factory=dict)
+    blocks: list[BlockWriteSchema] = Field(default_factory=list)
+    position: int = 0
+
+
+class TemplateUpdateSchema(Schema):
+    name: Optional[str] = None
+    title: Optional[str] = None
+    values: Optional[dict[str, Any]] = None
+    blocks: Optional[list[BlockWriteSchema]] = None
+    position: Optional[int] = None
 
 
 class RecordFilterSchema(Schema):
@@ -125,3 +149,5 @@ class RecordQuerySchema(Schema):
 BlockWriteSchema.model_rebuild()
 RecordCreateSchema.model_rebuild()
 RecordUpdateSchema.model_rebuild()
+TemplateWriteSchema.model_rebuild()
+TemplateUpdateSchema.model_rebuild()

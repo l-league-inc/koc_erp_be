@@ -39,7 +39,9 @@ audience: frontend
 {"action_ids": [1]}
 ```
 
-초안 `kind`는 `create_record` 또는 `update_record`입니다. `payload`는 워크스페이스 레코드 생성·수정과 같은 모양이고, 생성은 `database_slug`를 포함합니다. 담당 값은 `GET /api/v1/workspace/{workspace_id}/member`의 `user_id`입니다.
+초안 `kind`는 `create_record` 또는 `update_record`입니다. `payload`는 워크스페이스 레코드 생성·수정과 같은 쓰기 모양이고, 생성은 `database_slug`를 포함합니다. 관계 값은 레코드 id 배열입니다. 서버가 조회 도구로 읽는 관계 값은 `{id, title, database_id, database_slug}`이지만, 이 조회 결과는 화면 초안에 실리지 않습니다. 확정 뒤 레코드를 다시 조회하면 읽기 모양이 나옵니다. 담당 값은 `GET /api/v1/workspace/{workspace_id}/member`의 `user_id`입니다.
+
+대화 목록 항목은 `id`, `workspace_id`, `database_slug`, `preview`, `created_at`, `updated_at`입니다. 상세는 여기에 `messages`, `proposed_actions`가 있습니다. 메시지는 `id`, `role`(`user`/`assistant`), `content`, `created_at`입니다. 초안은 `id`, `kind`, `status`(`pending`/`confirmed`/`rejected`), `payload`, `result`입니다. 메시지 전송 응답은 `message`, `proposed_actions`입니다. 확정 응답은 `proposed_actions`와 `records`입니다. `records` 항목은 `action_id`, `record_id`, `title`입니다.
 
 없는 대화는 404, 멤버가 아니면 403, 빈 문장은 400입니다.
 

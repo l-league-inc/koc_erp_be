@@ -6,7 +6,7 @@ from ninja.testing import TestAsyncClient
 
 from user.utils import get_access_token
 from workspace.api import router
-from workspace.models import Database, Property, RecordActivity, Workspace, WorkspaceMember
+from workspace.models import Block, Database, Property, RecordActivity, Workspace, WorkspaceMember
 from workspace.seed import seed_koc_workspace
 
 User = get_user_model()
@@ -211,4 +211,196 @@ class WorkspaceApiTests(TestCase):
         self.assertEqual(
             slugs,
             {"hr", "daily", "gov", "purchase", "sales", "docs"},
+        )
+
+    async def _database_id(self, slug: str) -> int:
+        response = await self.client.get("/database", headers=self.headers())
+        self.assertEqual(response.status_code, 200)
+        return next(item["id"] for item in response.json() if item["slug"] == slug)
+
+    async def test_rich_text_block_and_invalid_annotation(self):
+        sales_id = await self._sales_id()
+        headers = self.headers()
+        created = await self.client.post(
+            f"/database/{sales_id}/record",
+            json={
+                "title": "서식 페이지",
+                "icon": "file",
+                "blocks": [
+                    {
+                        "type": "paragraph",
+                        "content": {
+                            "rich_text": [
+                                {"text": "굵게", "annotations": {"bold": True}},
+                            ]
+                        },
+                    }
+                ],
+            },
+            headers=headers,
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        self.assertEqual(created.json()["icon"], "file")
+        self.assertTrue(created.json()["blocks"][0]["content"]["rich_text"][0]["annotations"]["bold"])
+        rejected = await self.client.post(
+            f"/record/{created.json()['id']}/block",
+            json={
+                "type": "paragraph",
+                "content": {"rich_text": [{"text": "밑줄", "annotations": {"underline": True}}]},
+            },
+            headers=headers,
+        )
+        self.assertEqual(rejected.status_code, 400)
+
+    async def test_board_requires_group_by(self):
+        sales_id = await self._sales_id()
+        headers = self.headers()
+        missing = await self.client.post(
+            f"/database/{sales_id}/view",
+            json={"name": "상태 보드", "type": "board"},
+            headers=headers,
+        )
+        self.assertEqual(missing.status_code, 400)
+        created = await self.client.post(
+            f"/database/{sales_id}/view",
+            json={"name": "상태 보드", "type": "board", "config": {"group_by": "status"}},
+            headers=headers,
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        self.assertEqual(created.json()["config"]["group_by"], "status")
+
+    async def test_template_fills_record(self):
+        sales_id = await self._sales_id()
+        headers = self.headers()
+        template = await self.client.post(
+            f"/database/{sales_id}/template",
+            json={
+                "name": "A/S 템플릿",
+                "title": "A/S 접수",
+                "values": {"status": "접수", "kind": "A/S"},
+                "blocks": [{"type": "paragraph", "content": {"text": "템플릿 본문"}}],
+            },
+            headers=headers,
+        )
+        self.assertEqual(template.status_code, 201, template.json())
+        created = await self.client.post(
+            f"/database/{sales_id}/record",
+            json={"template_id": template.json()["id"]},
+            headers=headers,
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        self.assertEqual(created.json()["title"], "A/S 접수")
+        self.assertEqual(created.json()["values"]["status"], "접수")
+        self.assertEqual(created.json()["blocks"][0]["content"]["text"], "템플릿 본문")
+
+    async def test_trash_keeps_blocks_until_restore(self):
+        sales_id = await self._sales_id()
+        headers = self.headers()
+        created = await self.client.post(
+            f"/database/{sales_id}/record",
+            json={
+                "title": "복원 대상",
+                "blocks": [{"type": "paragraph", "content": {"text": "남길 본문"}}],
+            },
+            headers=headers,
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        record_id = created.json()["id"]
+        deleted = await self.client.delete(f"/record/{record_id}", headers=headers)
+        self.assertEqual(deleted.status_code, 204)
+        hidden = await self.client.get(f"/record/{record_id}", headers=headers)
+        self.assertEqual(hidden.status_code, 404)
+        block_count = await sync_to_async(Block.objects.filter(record_id=record_id).count)()
+        self.assertEqual(block_count, 1)
+        listed = await self.client.get("/", headers=headers)
+        workspace_id = listed.json()[0]["id"]
+        trash = await self.client.get(f"/{workspace_id}/trash", headers=headers)
+        self.assertEqual(trash.status_code, 200, trash.json())
+        self.assertEqual(trash.json()[0]["id"], record_id)
+        restored = await self.client.post(f"/record/{record_id}/restore", headers=headers)
+        self.assertEqual(restored.status_code, 200, restored.json())
+        self.assertEqual(restored.json()["blocks"][0]["content"]["text"], "남길 본문")
+
+    async def test_comment_reply_is_one_level(self):
+        sales_id = await self._sales_id()
+        headers = self.headers()
+        created = await self.client.post(
+            f"/database/{sales_id}/record",
+            json={"title": "댓글 대상"},
+            headers=headers,
+        )
+        record_id = created.json()["id"]
+        parent = await self.client.post(
+            f"/record/{record_id}/comment",
+            json={"body": "확인 부탁합니다"},
+            headers=headers,
+        )
+        self.assertEqual(parent.status_code, 201, parent.json())
+        reply = await self.client.post(
+            f"/record/{record_id}/comment",
+            json={"body": "확인했습니다", "parent_id": parent.json()["id"]},
+            headers=headers,
+        )
+        self.assertEqual(reply.status_code, 201, reply.json())
+        nested = await self.client.post(
+            f"/record/{record_id}/comment",
+            json={"body": "한 단계 더", "parent_id": reply.json()["id"]},
+            headers=headers,
+        )
+        self.assertEqual(nested.status_code, 400)
+        colleague = await sync_to_async(User.objects.create_user)(
+            email="commenter@example.com",
+            password="password1234!",
+            status=User.UserStatusChoice.ACTIVE,
+            name="동료",
+        )
+        listed = await self.client.get("/", headers=headers)
+        await sync_to_async(WorkspaceMember.objects.create)(
+            workspace_id=listed.json()[0]["id"],
+            user=colleague,
+            role=WorkspaceMember.Role.MEMBER,
+        )
+        denied = await self.client.delete(
+            f"/comment/{parent.json()['id']}",
+            headers=self.headers(colleague),
+        )
+        self.assertEqual(denied.status_code, 403)
+
+    async def test_relation_value_includes_title(self):
+        headers = self.headers()
+        sales_id = await self._sales_id()
+        gov_id = await self._database_id("gov")
+        target = await self.client.post(
+            f"/database/{gov_id}/record",
+            json={"title": "A사"},
+            headers=headers,
+        )
+        self.assertEqual(target.status_code, 201, target.json())
+        prop = await self.client.post(
+            f"/database/{sales_id}/property",
+            json={
+                "name": "거래처",
+                "slug": "client",
+                "type": "relation",
+                "config": {"database_id": gov_id},
+            },
+            headers=headers,
+        )
+        self.assertEqual(prop.status_code, 201, prop.json())
+        created = await self.client.post(
+            f"/database/{sales_id}/record",
+            json={"title": "견적", "values": {"client": [target.json()["id"]]}},
+            headers=headers,
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        self.assertEqual(
+            created.json()["values"]["client"],
+            [
+                {
+                    "id": target.json()["id"],
+                    "title": "A사",
+                    "database_id": gov_id,
+                    "database_slug": "gov",
+                }
+            ],
         )

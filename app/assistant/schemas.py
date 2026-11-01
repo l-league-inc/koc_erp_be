@@ -60,9 +60,42 @@ class ConfirmedRecordSchema(Schema):
     title: str
 
 
+class ConfirmedSkillSchema(Schema):
+    action_id: int
+    skill_id: int
+    name: str
+
+
 class ConfirmResultSchema(Schema):
     proposed_actions: list[ProposedActionResponseSchema]
     records: list[ConfirmedRecordSchema]
+    skills: list[ConfirmedSkillSchema]
+
+
+class SkillCreateSchema(Schema):
+    workspace_id: int
+    name: str
+    description: str
+    body: str
+    enabled: bool = True
+
+
+class SkillUpdateSchema(Schema):
+    description: Optional[str] = None
+    body: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class SkillResponseSchema(Schema):
+    id: Optional[int] = None
+    workspace_id: int
+    name: str
+    description: str
+    body: str
+    source: str
+    enabled: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class WorkbotWriteSchema(Schema):

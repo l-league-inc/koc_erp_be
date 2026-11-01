@@ -5,9 +5,10 @@ from typing import Any
 
 from django.db import transaction
 from django.db.models import OuterRef, Subquery
+from django.utils import timezone
 from ninja.errors import HttpError
 
-from assistant import llm
+from assistant import llm, skillbook
 from assistant.models import AgentMessage, AgentSession, ProposedAction
 from workspace.models import RecordActivity
 from workspace.utils import (
@@ -21,7 +22,7 @@ from workspace.utils import (
     update_record,
 )
 
-_MAX_ROUNDS = 5
+_MAX_ROUNDS = 8
 _TOOLS = [
     {
         "type": "function",
@@ -99,6 +100,63 @@ _TOOLS = [
                     "values": {"type": "object"},
                 },
                 "required": ["record_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_skills",
+            "description": "사용 가능한 스킬의 이름과 설명만 조회합니다. 본문은 포함하지 않습니다.",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "view_skill",
+            "description": "스킬 전문을 읽습니다. 설명과 맞는 일을 하기 전에 호출합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_create_skill",
+            "description": "워크스페이스 스킬 생성 초안을 만듭니다. 사용자가 확정하기 전에는 저장하지 않습니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "body": {"type": "string"},
+                    "enabled": {"type": "boolean"},
+                },
+                "required": ["name", "description", "body"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_update_skill",
+            "description": "워크스페이스 스킬 수정 초안을 만듭니다. 고정 스킬은 수정할 수 없습니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "body": {"type": "string"},
+                    "enabled": {"type": "boolean"},
+                },
+                "required": ["name"],
                 "additionalProperties": False,
             },
         },
@@ -225,14 +283,21 @@ def _history(session: AgentSession) -> list[dict[str, str]]:
     return [{"role": message.role, "content": message.content} for message in messages]
 
 
-def _system_prompt(session: AgentSession) -> str:
+def _system_prompt(session: AgentSession, user) -> str:
     scope = session.database_slug or "전체"
+    index = skillbook.active_index(session.workspace_id)
+    lines = [f"- {item['name']}: {item['description']}" for item in index]
+    catalog = "\n".join(lines) if lines else "- 없음"
     return (
         "당신은 KOC 워크스페이스 업무 도우미입니다. "
         f"워크스페이스 id는 {session.workspace_id}이고 범위는 {scope}입니다. "
+        f"오늘 날짜는 {timezone.now().date().isoformat()}이고 사용자 id는 {user.id}입니다. "
         "멤버, 스키마, 레코드는 도구로 조회합니다. "
-        "레코드를 만들거나 고칠 때는 propose 도구만 사용하고, 저장이 끝났다고 말하지 않습니다. "
-        "담당자는 list_members의 user_id를 사용합니다."
+        "담당자는 list_members의 user_id를 사용합니다. "
+        "아래는 스킬 이름과 설명입니다. 본문은 포함되어 있지 않습니다. "
+        "사용자 문장이 설명과 맞으면 view_skill로 전문을 읽고 그 절차를 따릅니다. "
+        "레코드나 스킬을 만들거나 고칠 때는 propose 도구만 사용하고, 저장이 끝났다고 말하지 않습니다.\n"
+        f"{catalog}"
     )
 
 
@@ -312,6 +377,26 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
         )
         created.append(action.id)
         return serialize_action(action)
+    if name == "list_skills":
+        return skillbook.active_index(session.workspace_id)
+    if name == "view_skill":
+        return skillbook.view_skill(session.workspace_id, str(arguments.get("name") or ""))
+    if name == "propose_create_skill":
+        action = ProposedAction.objects.create(
+            session=session,
+            kind=ProposedAction.Kind.CREATE_SKILL,
+            payload=skillbook.prepare_create_payload(session.workspace_id, arguments),
+        )
+        created.append(action.id)
+        return serialize_action(action)
+    if name == "propose_update_skill":
+        action = ProposedAction.objects.create(
+            session=session,
+            kind=ProposedAction.Kind.UPDATE_SKILL,
+            payload=skillbook.prepare_update_payload(session.workspace_id, arguments),
+        )
+        created.append(action.id)
+        return serialize_action(action)
     raise HttpError(400, "지원하지 않는 도구입니다.")
 
 
@@ -324,7 +409,7 @@ def send_message(user, session_id: int, content: str) -> dict[str, Any]:
     session = _session(user, session_id)
     AgentMessage.objects.create(session=session, role=AgentMessage.Role.USER, content=text)
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": _system_prompt(session)},
+        {"role": "system", "content": _system_prompt(session, user)},
         *_history(session),
     ]
     created: list[int] = []
@@ -385,6 +470,7 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
     if len(actions) != len(set(action_ids)):
         raise HttpError(404, "확정할 초안을 찾을 수 없습니다.")
     records = []
+    skills = []
     for action in actions:
         payload = action.payload or {}
         if action.kind == ProposedAction.Kind.CREATE_RECORD:
@@ -399,6 +485,10 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
                 },
                 RecordActivity.Source.AGENT,
             )
+            action.result = {"record_id": saved["id"]}
+            records.append(
+                {"action_id": action.id, "record_id": saved["id"], "title": saved["title"]}
+            )
         elif action.kind == ProposedAction.Kind.UPDATE_RECORD:
             saved = update_record(
                 user,
@@ -409,16 +499,26 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
                 },
                 RecordActivity.Source.AGENT,
             )
+            action.result = {"record_id": saved["id"]}
+            records.append(
+                {"action_id": action.id, "record_id": saved["id"], "title": saved["title"]}
+            )
+        elif action.kind in {
+            ProposedAction.Kind.CREATE_SKILL,
+            ProposedAction.Kind.UPDATE_SKILL,
+        }:
+            saved = skillbook.apply_skill_proposal(user, session.workspace_id, action.kind, payload)
+            action.result = {"skill_id": saved["id"], "name": saved["name"]}
+            skills.append(
+                {"action_id": action.id, "skill_id": saved["id"], "name": saved["name"]}
+            )
         else:
             raise HttpError(400, "지원하지 않는 초안입니다.")
         action.status = ProposedAction.Status.CONFIRMED
-        action.result = {"record_id": saved["id"]}
         action.save(update_fields=["status", "result", "updated_at"])
-        records.append(
-            {"action_id": action.id, "record_id": saved["id"], "title": saved["title"]}
-        )
     session.save(update_fields=["updated_at"])
     return {
         "proposed_actions": [serialize_action(action) for action in actions],
         "records": records,
+        "skills": skills,
     }

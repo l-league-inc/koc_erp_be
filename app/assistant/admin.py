@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.db.models import Count
 
-from assistant.models import AgentMessage, AgentSession, ProposedAction, Workbot, WorkbotRun
+from assistant.models import AgentMessage, AgentSession, ProposedAction, Skill, Workbot, WorkbotRun
 
 
 class _ReadOnlyInline(admin.TabularInline):
@@ -78,6 +78,14 @@ class ProposedActionAdmin(admin.ModelAdmin):
     list_filter = ["kind", "status"]
     search_fields = ["session__user__email"]
     readonly_fields = ["session", "kind", "status", "payload", "result", "created_at", "updated_at"]
+
+
+@admin.register(Skill)
+class SkillAdmin(admin.ModelAdmin):
+    list_display = ["id", "name", "workspace", "enabled", "created_by", "updated_at"]
+    list_filter = ["enabled", "workspace"]
+    search_fields = ["name", "description", "body", "created_by__email"]
+    readonly_fields = ["created_by", "created_at", "updated_at"]
 
 
 @admin.register(Workbot)

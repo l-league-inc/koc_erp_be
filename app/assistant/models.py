@@ -51,11 +51,13 @@ class AgentMessage(CommonModel):
 
 
 class ProposedAction(CommonModel):
-    """확정 전에 멈춰 둔 레코드 생성·수정입니다."""
+    """확정 전에 멈춰 둔 레코드·스킬 생성·수정입니다."""
 
     class Kind(models.TextChoices):
         CREATE_RECORD = ("create_record", "레코드 생성")
         UPDATE_RECORD = ("update_record", "레코드 수정")
+        CREATE_SKILL = ("create_skill", "스킬 생성")
+        UPDATE_SKILL = ("update_skill", "스킬 수정")
 
     class Status(models.TextChoices):
         PENDING = ("pending", "대기")
@@ -80,6 +82,39 @@ class ProposedAction(CommonModel):
 
     def __str__(self) -> str:
         return f"{self.session_id}:{self.kind}:{self.status}"
+
+
+class Skill(CommonModel):
+    """워크스페이스 업무 대화 스킬입니다. 고정 스킬은 파일이며 이 테이블에 없습니다."""
+
+    workspace = models.ForeignKey(
+        "workspace.Workspace",
+        on_delete=models.CASCADE,
+        related_name="skills",
+        help_text="워크스페이스",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="skills",
+        help_text="만든 사용자",
+    )
+    name = models.SlugField(max_length=50, help_text="이름")
+    description = models.CharField(max_length=300, help_text="설명")
+    body = models.TextField(help_text="절차")
+    enabled = models.BooleanField(default=True, help_text="활성")
+
+    class Meta(CommonModel.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "name"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="unique_skill_name",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.name
 
 
 class Workbot(CommonModel):

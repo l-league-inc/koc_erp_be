@@ -18,6 +18,9 @@ from assistant.schemas import (
     SessionDetailSchema,
     SessionListItemSchema,
     SessionResponseSchema,
+    SkillCreateSchema,
+    SkillResponseSchema,
+    SkillUpdateSchema,
     WorkbotDraftResponseSchema,
     WorkbotDraftSchema,
     WorkbotResponseSchema,
@@ -26,6 +29,7 @@ from assistant.schemas import (
     WorkbotUpdateSchema,
     WorkbotWriteSchema,
 )
+from assistant.skillbook import create_skill, delete_skill, list_skills, update_skill
 from assistant.workbot import (
     confirm_run,
     create_workbot,
@@ -104,6 +108,56 @@ async def send_message_api(request, session_id: int, payload: MessageCreateSchem
 )
 async def confirm_session_api(request, session_id: int, payload: ConfirmSchema):
     return await sync_to_async(confirm_actions)(request.auth, session_id, payload.action_ids)
+
+
+@agent_router.get(
+    "/skill",
+    summary="[C] 업무 스킬 목록 조회",
+    description="고정 스킬과 워크스페이스 스킬을 조회합니다. 고정 스킬은 id가 없습니다.",
+    response=list[SkillResponseSchema],
+    auth=jwt_auth,
+)
+async def list_skill_api(request, workspace_id: int = Query(...)):
+    return await sync_to_async(list_skills)(request.auth, workspace_id)
+
+
+@agent_router.post(
+    "/skill",
+    summary="[C] 업무 스킬 생성",
+    description="워크스페이스 스킬을 만듭니다. 고정 스킬 이름은 쓸 수 없습니다.",
+    response={201: SkillResponseSchema},
+    auth=jwt_auth,
+)
+async def create_skill_api(request, payload: SkillCreateSchema):
+    skill = await sync_to_async(create_skill)(request.auth, _dump(payload))
+    return 201, skill
+
+
+@agent_router.patch(
+    "/skill/{skill_id}",
+    summary="[C] 업무 스킬 수정",
+    description="설명, 본문, 활성 상태를 수정합니다. 고정 스킬은 수정할 수 없습니다.",
+    response=SkillResponseSchema,
+    auth=jwt_auth,
+)
+async def update_skill_api(request, skill_id: int, payload: SkillUpdateSchema):
+    return await sync_to_async(update_skill)(
+        request.auth,
+        skill_id,
+        _dump(payload, exclude_unset=True),
+    )
+
+
+@agent_router.delete(
+    "/skill/{skill_id}",
+    summary="[C] 업무 스킬 삭제",
+    description="워크스페이스 스킬을 소프트 삭제합니다. 고정 스킬은 삭제할 수 없습니다.",
+    response={204: None},
+    auth=jwt_auth,
+)
+async def delete_skill_api(request, skill_id: int):
+    await sync_to_async(delete_skill)(request.auth, skill_id)
+    return 204, None
 
 
 @workbot_router.get(

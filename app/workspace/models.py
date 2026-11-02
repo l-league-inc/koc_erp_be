@@ -246,6 +246,101 @@ class RelationLink(CommonModel):
         ]
 
 
+class Page(CommonModel):
+    """사이드바 페이지입니다. 폴더, 문서, 데이터베이스, 연결 보기입니다."""
+
+    class Kind(models.TextChoices):
+        FOLDER = ("folder", "폴더")
+        DOCUMENT = ("document", "문서")
+        DATABASE = ("database", "데이터베이스")
+        LINKED_VIEW = ("linked_view", "연결 보기")
+
+    workspace = models.ForeignKey(
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name="pages",
+        help_text="워크스페이스",
+    )
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="children",
+        help_text="부모 페이지",
+    )
+    kind = models.CharField(max_length=20, choices=Kind.choices, help_text="종류")
+    name = models.CharField(max_length=100, help_text="이름")
+    slug = models.SlugField(max_length=50, blank=True, default="", help_text="폴더 키")
+    icon = models.CharField(max_length=50, blank=True, default="", help_text="아이콘")
+    position = models.PositiveIntegerField(default=0, help_text="정렬 순서")
+    database = models.ForeignKey(
+        Database,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pages",
+        help_text="데이터베이스",
+    )
+    view = models.ForeignKey(
+        "View",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="linked_pages",
+        help_text="연결 보기",
+    )
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "slug"],
+                condition=models.Q(deleted_at__isnull=True) & ~models.Q(slug=""),
+                name="unique_page_folder_slug",
+            ),
+            models.UniqueConstraint(
+                fields=["database"],
+                condition=models.Q(deleted_at__isnull=True, kind="database"),
+                name="unique_database_page",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class PageFavorite(CommonModel):
+    """사용자가 즐겨찾기한 페이지입니다."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="page_favorites",
+        help_text="사용자",
+    )
+    page = models.ForeignKey(
+        Page,
+        on_delete=models.CASCADE,
+        related_name="favorites",
+        help_text="페이지",
+    )
+    position = models.PositiveIntegerField(default=0, help_text="정렬 순서")
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "page"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="unique_page_favorite",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id}:{self.page_id}"
+
+
 class Block(CommonModel):
     """페이지 본문 블록입니다."""
 
@@ -267,8 +362,18 @@ class Block(CommonModel):
     record = models.ForeignKey(
         Record,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="blocks",
         help_text="레코드",
+    )
+    page = models.ForeignKey(
+        Page,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="blocks",
+        help_text="문서 페이지",
     )
     parent = models.ForeignKey(
         "self",
@@ -284,9 +389,18 @@ class Block(CommonModel):
 
     class Meta:
         ordering = ["position", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(record__isnull=False, page__isnull=True)
+                    | models.Q(record__isnull=True, page__isnull=False)
+                ),
+                name="block_record_or_page",
+            )
+        ]
 
     def __str__(self) -> str:
-        return f"{self.record_id}:{self.type}"
+        return f"{self.record_id or self.page_id}:{self.type}"
 
 
 class View(CommonModel):

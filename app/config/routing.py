@@ -6,8 +6,9 @@ from channels.security.websocket import AllowedHostsOriginValidator
 
 def get_websocket_urlpatterns():
     from notification.routing import websocket_urlpatterns as notification_urlpatterns
+    from workspace.routing import websocket_urlpatterns as workspace_urlpatterns
 
-    return notification_urlpatterns
+    return notification_urlpatterns + workspace_urlpatterns
 
 
 def get_application():

@@ -36,7 +36,7 @@ class ViewResponseSchema(Schema):
     database_id: int
     name: str
     type: str
-    filters: list
+    filters: Any
     sorts: list
     config: dict
     position: int
@@ -67,7 +67,8 @@ class DatabaseDetailResponseSchema(DatabaseResponseSchema):
 
 class BlockResponseSchema(Schema):
     id: int
-    record_id: int
+    record_id: Optional[int]
+    page_id: Optional[int] = None
     parent_id: Optional[int]
     type: str
     content: dict
@@ -137,10 +138,57 @@ class TemplateResponseSchema(Schema):
 
 
 class TrashRecordResponseSchema(Schema):
+    kind: str = "record"
     id: int
     title: str
     icon: str
-    database_id: int
-    database_slug: str
-    database_name: str
+    database_id: Optional[int] = None
+    database_slug: str = ""
+    database_name: str = ""
+    page_kind: Optional[str] = None
     deleted_at: datetime
+
+
+class PageResponseSchema(Schema):
+    id: int
+    workspace_id: int
+    parent_id: Optional[int]
+    kind: str
+    name: str
+    slug: str
+    icon: str
+    position: int
+    database_id: Optional[int]
+    view_id: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+
+class PageDetailResponseSchema(PageResponseSchema):
+    blocks: list[BlockResponseSchema] = Field(default_factory=list)
+
+
+class FavoriteResponseSchema(Schema):
+    id: int
+    page_id: int
+    name: str
+    kind: str
+    icon: str
+    position: int
+    database_id: Optional[int]
+    view_id: Optional[int]
+
+
+class SearchHitSchema(Schema):
+    kind: str
+    id: int
+    title: str
+    database_id: Optional[int]
+    database_slug: str
+
+
+class SearchResponseSchema(Schema):
+    count: int
+    page: int
+    page_size: int
+    data: list[SearchHitSchema]

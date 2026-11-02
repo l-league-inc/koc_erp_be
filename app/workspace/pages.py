@@ -609,6 +609,9 @@ def _ensure_database(workspace: Workspace, spec: dict[str, Any], position: int) 
             sorts=[],
             position=0,
         )
+    from workspace.tree import ensure_database_page
+
+    ensure_database_page(database)
     return database
 
 

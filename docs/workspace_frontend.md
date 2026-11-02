@@ -5,7 +5,7 @@ audience: frontend
 
 # 워크스페이스 API
 
-KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다. 화면의 데이터베이스는 slug로 구분하고, 사이드바 페이지는 `section_slug`로 묶습니다. 인증은 기존 JWT입니다. 기본 페이지의 속성 표는 [koc_pages_frontend.md](koc_pages_frontend.md)입니다. 레코드 본문, 댓글, 활동, 보드·캘린더·갤러리, 템플릿, 휴지통은 [workspace_page_frontend.md](workspace_page_frontend.md)입니다.
+KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다. 화면의 데이터베이스는 slug로 구분합니다. 옛 사이드바는 `section_slug`로 묶고, 새 사이드바는 `GET /{workspace_id}/page`의 `parent_id`로 트리를 만듭니다. 인증은 기존 JWT입니다. 기본 페이지의 속성 표는 [koc_pages_frontend.md](koc_pages_frontend.md)입니다. 레코드 본문, 댓글, 활동, 보드·캘린더·갤러리, 템플릿, 휴지통, 페이지 트리, 변경 알림은 [workspace_page_frontend.md](workspace_page_frontend.md)입니다.
 
 ## 유저 플로우
 
@@ -165,9 +165,11 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 }
 ```
 
-`database_slug`, `database_id`, `view_id`를 비우면 멤버인 모든 영역의 행입니다. `view_id`가 있으면 그 데이터베이스로 좁히고, 보기 필터를 요청 필터보다 먼저 적용합니다. 둘 다 AND입니다. 요청 `sorts`가 있으면 보기 정렬 대신 그 정렬을 씁니다. `q`는 제목만 찾습니다. `page_size` 상한은 100입니다.
+`database_slug`, `database_id`, `view_id`를 비우면 멤버인 모든 영역의 행입니다. `view_id`가 있으면 그 데이터베이스로 좁히고, 보기 필터를 요청 필터보다 먼저 적용합니다. 둘 다 AND입니다. 요청 `sorts`가 있으면 보기 정렬 대신 그 정렬을 씁니다. `q`는 제목, 속성 텍스트, 블록 본문을 찾습니다. `page_size` 상한은 100입니다.
 
-연산은 `eq`, `neq`, `contains`, `in`, `gt`, `gte`, `lt`, `lte`, `is_empty`입니다. 사람 속성의 `"me"`는 호출자 id로 바뀝니다. `in`의 값은 배열입니다. `is_empty`는 `value`가 없어도 됩니다.
+연산은 `eq`, `neq`, `contains`, `in`, `gt`, `gte`, `lt`, `lte`, `is_empty`입니다. 사람 속성과 `created_by`, `last_edited_by`의 `"me"`는 호출자 id로 바뀝니다. `in`의 값은 배열입니다. `is_empty`는 `value`가 없어도 됩니다. 필터가 목록이면 모두 AND입니다. 그룹은 `{op: "and"|"or", filters: [...]}`이고, 그 안에 그룹을 한 단계 더 넣을 수 있습니다. 예약 키 `created_at`, `updated_at`, `created_by`, `last_edited_by`는 속성 행 없이 필터와 정렬에 씁니다.
+
+사이드바 검색은 `POST /search`입니다. 본문은 `{workspace_id, q, page, page_size}`이고, 응답 `data`는 `{kind, id, title, database_id, database_slug}`입니다. `kind`는 `record` 또는 `page`입니다.
 
 응답은 `count`, `page`, `page_size`, `data`입니다. `data` 항목은 `id`, `database_id`, `database_slug`, `database_name`, `title`, `icon`, `values`, `created_by_id`, `last_edited_by_id`, `created_at`, `updated_at`입니다. 목록에는 `blocks`가 없습니다.
 
@@ -217,7 +219,11 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 
 `DELETE /block/{block_id}` 그 블록과 하위 블록만 지웁니다. 휴지통에 들어가지 않습니다.
 
-블록 응답은 `id`, `record_id`, `parent_id`, `type`, `content`, `position`, `created_at`, `updated_at`입니다.
+블록 응답은 `id`, `record_id`, `page_id`, `parent_id`, `type`, `content`, `position`, `created_at`, `updated_at`입니다. 레코드 블록은 `page_id`가 비어 있고, 문서 페이지 블록은 `record_id`가 비어 있습니다.
+
+`POST /record/{record_id}/duplicate`는 제목에 ` 복사`를 붙이고 아이콘, 값, 관계, 블록을 복사합니다. 댓글과 활동은 복사하지 않습니다.
+
+관계 `config`에 `two_way: true`를 넣으면 대상 데이터베이스에 반대 속성이 생기고 `synced_property_id`로 서로 묶입니다. 값을 저장하면 반대 링크도 갱신됩니다. `two_way`가 없는 기존 관계는 한 방향입니다.
 
 기본 블록 타입은 `paragraph`, `heading_1`, `heading_2`, `heading_3`, `bulleted_list`, `numbered_list`, `to_do`, `quote`, `divider`입니다. `content.text` 문자열을 그대로 쓸 수 있습니다. 서식과 `toggle`, `callout`, `code`, `image`는 페이지 문서에 있습니다.
 
@@ -232,10 +238,13 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 - 담당자 선택 목록은 `GET /{workspace_id}/member`의 `user_id`만 보낸다. 화면 이름은 `name`으로 붙인다.
 - 관계 칸은 읽을 때 객체의 `title`을 보여주고, 저장할 때는 id 배열만 보낸다.
 - 행 삭제는 휴지통으로 보내고, 블록만 지운 경우는 바로 없앤다.
+- 새 사이드바는 `GET /{workspace_id}/page`의 `parent_id`로 트리를 만든다. `section_slug` 묶음도 같은 폴더로 유지된다.
+- 표 검색은 `query`의 `q`, 사이드바 검색은 `POST /search`를 쓴다.
+- 관계 칸을 양쪽으로 보이게 할 때만 `config.two_way`를 보낸다.
 
 ## 비범위
 
-- Notion.com 동기화, 수식, 롤업, 버튼
+- Notion.com 동기화, 수식, 롤업, 버튼, 글자 단위 동시 편집
 - MCP로 삭제, 멤버 변경, 스키마 변경, 댓글, 템플릿, 휴지통. 워크스페이스 레코드 도구는 조회, 생성, 수정만 한다.
 - 화면의 자동화 워크봇. 계약은 [workbot_frontend.md](workbot_frontend.md)입니다.
 - 앱 안 업무 대화. 계약은 [agent_frontend.md](agent_frontend.md)입니다.

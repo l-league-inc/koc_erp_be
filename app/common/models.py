@@ -25,7 +25,7 @@ class CommonModel(models.Model):
         ordering = ["-created_at"]
 
     def delete(self, using=None, keep_parents=False):
-        self.deleted_at = timezone.make_aware(timezone.now())
+        self.deleted_at = timezone.now()
         self.save(update_fields=["deleted_at"])
 
     def hard_delete(self, using=None, keep_parents=False):

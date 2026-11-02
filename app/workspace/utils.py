@@ -1,17 +1,21 @@
+import json
 import re
 from datetime import datetime, time
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from django.db import IntegrityError, transaction
-from django.db.models import OuterRef, Q, QuerySet, Subquery
+from django.db.models import OuterRef, Q, QuerySet, Subquery, TextField
+from django.db.models.functions import Cast
 from django.utils.dateparse import parse_date, parse_datetime
 from ninja.errors import HttpError
 
+from workspace.events import publish_workspace_event
 from workspace.models import (
     Block,
     Database,
     DatabaseTemplate,
+    Page,
     Property,
     PropertyValue,
     Record,
@@ -40,6 +44,10 @@ OPTION_TYPES = {
     Property.Type.MULTI_SELECT,
 }
 FILTER_OPS = {"eq", "neq", "contains", "in", "gt", "gte", "lt", "lte", "is_empty"}
+FILTER_GROUP_OPS = {"and", "or"}
+SYSTEM_FIELDS = {"created_at", "updated_at", "created_by", "last_edited_by"}
+SYSTEM_USER_FIELDS = {"created_by", "last_edited_by"}
+SYSTEM_DATE_FIELDS = {"created_at", "updated_at"}
 RICH_TEXT_ANNOTATIONS = {"bold", "italic", "strikethrough", "code", "color"}
 BOOL_ANNOTATIONS = {"bold", "italic", "strikethrough", "code"}
 GROUP_PROPERTY_TYPES = {
@@ -141,13 +149,22 @@ def get_view(user, view_id: int) -> View:
 
 def get_block(user, block_id: int) -> Block:
     block = (
-        Block.objects.select_related("record", "record__database", "record__database__workspace")
+        Block.objects.select_related(
+            "record",
+            "record__database",
+            "record__database__workspace",
+            "page",
+            "page__workspace",
+        )
         .filter(id=block_id)
         .first()
     )
     if block is None:
         raise HttpError(404, "블록을 찾을 수 없습니다.")
-    if not _membership_exists(user, block.record.database.workspace_id):
+    workspace_id = (
+        block.record.database.workspace_id if block.record_id else block.page.workspace_id
+    )
+    if not _membership_exists(user, workspace_id):
         raise HttpError(403, "워크스페이스에 접근할 수 없습니다.")
     return block
 
@@ -250,6 +267,7 @@ def serialize_block(block: Block) -> dict[str, Any]:
     return {
         "id": block.id,
         "record_id": block.record_id,
+        "page_id": block.page_id,
         "parent_id": block.parent_id,
         "type": block.type,
         "content": block.content or {},
@@ -408,7 +426,16 @@ def normalize_property_config(prop_type: str, config: dict | None, workspace_id:
         target = Database.objects.filter(id=database_id, workspace_id=workspace_id).first()
         if target is None:
             raise HttpError(400, "관계 대상 데이터베이스를 찾을 수 없습니다.")
-        return {"database_id": target.id}
+        cleaned = {"database_id": target.id}
+        synced = payload.get("synced_property_id")
+        if synced is not None:
+            if isinstance(synced, bool) or not isinstance(synced, int):
+                raise HttpError(400, "반대 관계 속성은 id여야 합니다.")
+            cleaned["synced_property_id"] = synced
+            cleaned["two_way"] = True
+        elif payload.get("two_way") is True:
+            cleaned["two_way"] = True
+        return cleaned
     return payload
 
 
@@ -433,8 +460,14 @@ def _clear_value(record: Record, prop: Property) -> None:
     if stored is not None:
         stored.delete()
     if prop.type == Property.Type.RELATION:
+        old_ids = list(
+            RelationLink.objects.filter(property=prop, from_record=record).values_list(
+                "to_record_id", flat=True
+            )
+        )
         for link in RelationLink.objects.filter(property=prop, from_record=record):
             link.delete()
+        _sync_reverse_links(prop, record, old_ids, [])
 
 
 def _store_columns(record: Record, prop: Property, columns: dict[str, Any]) -> None:
@@ -451,6 +484,11 @@ def _store_columns(record: Record, prop: Property, columns: dict[str, Any]) -> N
 
 
 def _replace_links(prop: Property, record: Record, target_ids: list[int]) -> None:
+    old_ids = list(
+        RelationLink.objects.filter(property=prop, from_record=record).values_list(
+            "to_record_id", flat=True
+        )
+    )
     for link in RelationLink.objects.filter(property=prop, from_record=record):
         link.delete()
     for target_id in target_ids:
@@ -459,6 +497,136 @@ def _replace_links(prop: Property, record: Record, target_ids: list[int]) -> Non
             from_record=record,
             to_record_id=target_id,
         )
+    _sync_reverse_links(prop, record, old_ids, target_ids)
+
+
+def _reverse_property(prop: Property) -> Property | None:
+    synced_id = (prop.config or {}).get("synced_property_id")
+    if not isinstance(synced_id, int) or synced_id == prop.id:
+        return None
+    reverse = Property.objects.filter(id=synced_id, type=Property.Type.RELATION).first()
+    if reverse is None:
+        return None
+    if (reverse.config or {}).get("synced_property_id") != prop.id:
+        return None
+    return reverse
+
+
+def _write_relation_ids(prop: Property, record_id: int) -> None:
+    ids = list(
+        RelationLink.objects.filter(property=prop, from_record_id=record_id).values_list(
+            "to_record_id", flat=True
+        )
+    )
+    record = Record.objects.filter(id=record_id).first()
+    if record is None:
+        return
+    if not ids:
+        stored = PropertyValue.objects.filter(record_id=record_id, property=prop).first()
+        if stored is not None:
+            stored.delete()
+        return
+    _store_columns(
+        record,
+        prop,
+        {"json_value": ids, "text_value": ",".join(str(item) for item in ids)},
+    )
+
+
+def _sync_reverse_links(
+    prop: Property,
+    record: Record,
+    old_ids: list[int],
+    new_ids: list[int],
+) -> None:
+    reverse = _reverse_property(prop)
+    if reverse is None:
+        return
+    old_set = set(old_ids)
+    new_set = set(new_ids)
+    for target_id in old_set - new_set:
+        for link in RelationLink.objects.filter(
+            property=reverse,
+            from_record_id=target_id,
+            to_record=record,
+        ):
+            link.delete()
+        _write_relation_ids(reverse, target_id)
+    for target_id in new_set - old_set:
+        if not RelationLink.objects.filter(
+            property=reverse,
+            from_record_id=target_id,
+            to_record=record,
+        ).exists():
+            RelationLink.objects.create(
+                property=reverse,
+                from_record_id=target_id,
+                to_record=record,
+            )
+        _write_relation_ids(reverse, target_id)
+
+
+def _unique_property_slug(database: Database, base: str) -> str:
+    slug = base[:50]
+    number = 2
+    while database.properties.filter(slug=slug).exists():
+        suffix = f"_{number}"
+        slug = f"{base[: 50 - len(suffix)]}{suffix}"
+        number += 1
+    return slug
+
+
+def _bind_two_way(prop: Property) -> Property | None:
+    if prop.type != Property.Type.RELATION or not (prop.config or {}).get("two_way"):
+        return None
+    synced_id = (prop.config or {}).get("synced_property_id")
+    if synced_id is not None:
+        _link_existing_reverse(prop, int(synced_id))
+        return None
+    target = Database.objects.filter(id=prop.config["database_id"]).first()
+    if target is None:
+        raise HttpError(400, "관계 대상 데이터베이스를 찾을 수 없습니다.")
+    reverse = Property.objects.create(
+        database=target,
+        name=prop.name,
+        slug=_unique_property_slug(target, f"{prop.slug}_rel"),
+        type=Property.Type.RELATION,
+        config={
+            "database_id": prop.database_id,
+            "two_way": True,
+            "synced_property_id": prop.id,
+        },
+        position=(target.properties.order_by("-position").values_list("position", flat=True).first() or 0)
+        + 1,
+    )
+    prop.config = {**(prop.config or {}), "two_way": True, "synced_property_id": reverse.id}
+    prop.save(update_fields=["config", "updated_at"])
+    return reverse
+
+
+def _link_existing_reverse(prop: Property, synced_id: int) -> None:
+    if synced_id == prop.id:
+        raise HttpError(400, "관계 속성은 자기 자신과 묶을 수 없습니다.")
+    other = Property.objects.filter(id=synced_id, type=Property.Type.RELATION).first()
+    if other is None or other.database_id != (prop.config or {}).get("database_id"):
+        raise HttpError(400, "반대 관계 속성을 찾을 수 없습니다.")
+    if (other.config or {}).get("database_id") != prop.database_id:
+        raise HttpError(400, "반대 관계의 대상이 이 데이터베이스가 아닙니다.")
+    other_synced = (other.config or {}).get("synced_property_id")
+    if other_synced not in (None, prop.id):
+        raise HttpError(400, "이미 다른 속성과 묶인 관계입니다.")
+    current = (prop.config or {}).get("synced_property_id")
+    if current not in (None, other.id):
+        raise HttpError(400, "이미 다른 속성과 묶인 관계입니다.")
+    other.config = {
+        **(other.config or {}),
+        "database_id": prop.database_id,
+        "two_way": True,
+        "synced_property_id": prop.id,
+    }
+    other.save(update_fields=["config", "updated_at"])
+    prop.config = {**(prop.config or {}), "two_way": True, "synced_property_id": other.id}
+    prop.save(update_fields=["config", "updated_at"])
 
 
 def _coerce(prop: Property, raw: Any, record: Record) -> dict[str, Any]:
@@ -676,19 +844,27 @@ def validate_block_content(block_type: str, content: Any, workspace_id: int) -> 
     return content
 
 
-def create_block_tree(record: Record, blocks: list[dict], parent: Block | None) -> None:
-    workspace_id = record.database.workspace_id
+def create_block_tree(
+    record: Record | None,
+    blocks: list[dict],
+    parent: Block | None,
+    page: Page | None = None,
+) -> None:
+    if record is None and page is None:
+        raise HttpError(400, "블록을 저장할 페이지가 없습니다.")
+    workspace_id = record.database.workspace_id if record is not None else page.workspace_id
     for index, data in enumerate(blocks or []):
         block_type = _validate_block_type(str(data.get("type") or ""))
         content = validate_block_content(block_type, data.get("content") or {}, workspace_id)
         created = Block.objects.create(
             record=record,
+            page=None if record is not None else page,
             parent=parent,
             type=block_type,
             content=content,
             position=int(data.get("position", index)),
         )
-        create_block_tree(record, data.get("children") or [], created)
+        create_block_tree(record, data.get("children") or [], created, page)
 
 
 def replace_blocks(record: Record, blocks: list[dict]) -> None:
@@ -794,8 +970,10 @@ def delete_workspace(user, workspace_id: int) -> None:
     membership = get_membership(user, workspace_id)
     if membership.role != WorkspaceMember.Role.OWNER:
         raise HttpError(403, "워크스페이스를 삭제할 권한이 없습니다.")
-    for database in Database.objects.filter(workspace_id=workspace_id):
-        delete_database_object(database)
+    for database in list(Database.objects.filter(workspace_id=workspace_id)):
+        delete_database(user, database.id)
+    for page in Page.objects.filter(workspace_id=workspace_id):
+        page.delete()
     for member in WorkspaceMember.objects.filter(workspace_id=workspace_id):
         member.delete()
     membership.workspace.delete()
@@ -825,6 +1003,11 @@ def create_database(user, data: dict[str, Any]) -> dict[str, Any]:
             type=Property.Type.TITLE,
             position=0,
         )
+        from workspace.tree import ensure_database_page
+
+        page = ensure_database_page(database)
+        publish_workspace_event(database.workspace_id, "database", "created", database.id, user.id)
+        publish_workspace_event(database.workspace_id, "page", "created", page.id, user.id)
         return serialize_database(database, detail=True)
 
     return _save_integrity(_create)
@@ -852,6 +1035,11 @@ def update_database(user, database_id: int, data: dict[str, Any]) -> dict[str, A
 
     def _save():
         database.save()
+        from workspace.tree import ensure_database_page
+
+        page = ensure_database_page(database)
+        publish_workspace_event(database.workspace_id, "database", "updated", database.id, user.id)
+        publish_workspace_event(database.workspace_id, "page", "updated", page.id, user.id)
         return serialize_database(database, detail=True)
 
     return _save_integrity(_save)
@@ -872,7 +1060,16 @@ def delete_database_object(database: Database) -> None:
 @transaction.atomic
 def delete_database(user, database_id: int) -> None:
     database = get_database(user, database_id)
+    page = Page.objects.filter(database=database, kind=Page.Kind.DATABASE).first()
+    if page is not None:
+        from workspace.tree import delete_database_page
+
+        delete_database_page(user, page)
+        return
+    workspace_id = database.workspace_id
+    deleted_id = database.id
     delete_database_object(database)
+    publish_workspace_event(workspace_id, "database", "deleted", deleted_id, user.id)
 
 
 def _ensure_single_title(database: Database, prop_type: str, current_id: int | None) -> None:
@@ -903,6 +1100,13 @@ def create_property(user, database_id: int, data: dict[str, Any]) -> dict[str, A
         )
         if not prop.name:
             raise HttpError(400, "속성 이름이 필요합니다.")
+        reverse = _bind_two_way(prop)
+        prop.refresh_from_db()
+        publish_workspace_event(database.workspace_id, "property", "created", prop.id, user.id)
+        if reverse is not None:
+            publish_workspace_event(
+                reverse.database.workspace_id, "property", "created", reverse.id, user.id
+            )
         return serialize_property(prop)
 
     return _save_integrity(_create)
@@ -919,6 +1123,7 @@ def update_property(user, property_id: int, data: dict[str, Any]) -> dict[str, A
         if PropertyValue.objects.filter(property=prop).exists():
             raise HttpError(400, "값이 있는 속성의 타입은 바꿀 수 없습니다.")
         prop.type = next_type
+    previous_synced = (prop.config or {}).get("synced_property_id")
     if type_changed or ("config" in data and data["config"] is not None):
         prop.config = normalize_property_config(
             prop.type,
@@ -937,9 +1142,32 @@ def update_property(user, property_id: int, data: dict[str, Any]) -> dict[str, A
 
     def _save():
         prop.save()
+        if prop.type == Property.Type.RELATION and (prop.config or {}).get("two_way"):
+            _bind_two_way(prop)
+            prop.refresh_from_db()
+        elif previous_synced:
+            _unlink_two_way(prop, int(previous_synced))
+        publish_workspace_event(
+            prop.database.workspace_id, "property", "updated", prop.id, user.id
+        )
         return serialize_property(prop)
 
     return _save_integrity(_save)
+
+
+def _unlink_two_way(prop: Property, other_id: int) -> None:
+    other = Property.objects.filter(id=other_id).first()
+    if other is not None and (other.config or {}).get("synced_property_id") == prop.id:
+        config = dict(other.config or {})
+        config.pop("synced_property_id", None)
+        config.pop("two_way", None)
+        other.config = config
+        other.save(update_fields=["config", "updated_at"])
+    config = dict(prop.config or {})
+    config.pop("synced_property_id", None)
+    config.pop("two_way", None)
+    prop.config = config
+    prop.save(update_fields=["config", "updated_at"])
 
 
 @transaction.atomic
@@ -947,29 +1175,68 @@ def delete_property(user, property_id: int) -> None:
     prop = get_property(user, property_id)
     if prop.type == Property.Type.TITLE:
         raise HttpError(400, "제목 속성은 지울 수 없습니다.")
+    synced_id = (prop.config or {}).get("synced_property_id")
     for stored in PropertyValue.objects.filter(property=prop):
         stored.delete()
     for link in RelationLink.objects.filter(property=prop):
         link.delete()
+    workspace_id = prop.database.workspace_id
+    property_id = prop.id
     prop.delete()
+    if isinstance(synced_id, int):
+        other = Property.objects.filter(id=synced_id).first()
+        if other is not None and (other.config or {}).get("synced_property_id") == property_id:
+            config = dict(other.config or {})
+            config.pop("synced_property_id", None)
+            config.pop("two_way", None)
+            other.config = config
+            other.save(update_fields=["config", "updated_at"])
+    publish_workspace_event(workspace_id, "property", "deleted", property_id, user.id)
+
+
+def _normalize_filter_leaf(item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict) or "property" not in item or "op" not in item:
+        raise HttpError(400, "필터에는 property와 op가 필요합니다.")
+    op = str(item["op"])
+    if op not in FILTER_OPS:
+        raise HttpError(400, "지원하지 않는 필터 연산입니다.")
+    return {"property": str(item["property"]), "op": op, "value": item.get("value")}
+
+
+def _normalize_filter_node(node: Any, depth: int) -> dict[str, Any]:
+    if (
+        isinstance(node, dict)
+        and "filters" in node
+        and "property" not in node
+        and node.get("op") in FILTER_GROUP_OPS
+    ):
+        if depth >= 2:
+            raise HttpError(400, "필터 그룹은 두 단계까지만 중첩할 수 있습니다.")
+        children = node.get("filters")
+        if not isinstance(children, list) or not children:
+            raise HttpError(400, "필터 그룹에는 조건이 필요합니다.")
+        return {
+            "op": str(node["op"]),
+            "filters": [_normalize_filter_node(child, depth + 1) for child in children],
+        }
+    return _normalize_filter_leaf(node)
+
+
+def _normalize_filters(items: Any) -> list[dict[str, Any]] | dict[str, Any]:
+    if items is None:
+        return []
+    if isinstance(items, list):
+        return [_normalize_filter_node(item, 0) for item in items]
+    if isinstance(items, dict):
+        return _normalize_filter_node(items, 0)
+    raise HttpError(400, "필터는 목록이거나 그룹이어야 합니다.")
 
 
 def _normalize_filter_items(items: Any) -> list[dict[str, Any]]:
-    if items is None:
-        return []
-    if not isinstance(items, list):
+    normalized = _normalize_filters(items)
+    if isinstance(normalized, dict):
         raise HttpError(400, "필터는 목록이어야 합니다.")
-    cleaned = []
-    for item in items:
-        if not isinstance(item, dict) or "property" not in item or "op" not in item:
-            raise HttpError(400, "필터에는 property와 op가 필요합니다.")
-        op = str(item["op"])
-        if op not in FILTER_OPS:
-            raise HttpError(400, "지원하지 않는 필터 연산입니다.")
-        cleaned.append(
-            {"property": str(item["property"]), "op": op, "value": item.get("value")}
-        )
-    return cleaned
+    return normalized
 
 
 def _property_by_slug(database: Database, slug: Any) -> Property | None:
@@ -1003,6 +1270,33 @@ def validate_view_config(database: Database, view_type: str, config: Any) -> dic
             prop = _property_by_slug(database, cover)
             if prop is None or prop.type not in COVER_PROPERTY_TYPES:
                 raise HttpError(400, "갤러리 커버는 파일 또는 URL 속성만 쓸 수 있습니다.")
+    elif view_type == View.Type.TABLE:
+        slug = config.get("group_by")
+        if slug not in (None, ""):
+            prop = _property_by_slug(database, slug)
+            if prop is None or prop.type not in GROUP_PROPERTY_TYPES:
+                raise HttpError(400, "표 그룹은 선택, 상태, 다중 선택 속성만 쓸 수 있습니다.")
+    hidden = config.get("hidden_properties", [])
+    if hidden is None:
+        hidden = []
+    if not isinstance(hidden, list) or any(not isinstance(item, str) for item in hidden):
+        raise HttpError(400, "숨길 속성은 slug 목록이어야 합니다.")
+    for slug in hidden:
+        prop = _property_by_slug(database, slug)
+        if prop is None:
+            raise HttpError(400, "숨길 속성을 찾을 수 없습니다.")
+        if prop.type == Property.Type.TITLE:
+            raise HttpError(400, "제목 속성은 숨길 수 없습니다.")
+    widths = config.get("column_widths", {})
+    if widths is None:
+        widths = {}
+    if not isinstance(widths, dict):
+        raise HttpError(400, "열 너비는 객체여야 합니다.")
+    for slug, width in widths.items():
+        if _property_by_slug(database, slug) is None:
+            raise HttpError(400, "열 너비의 속성을 찾을 수 없습니다.")
+        if isinstance(width, bool) or not isinstance(width, int) or width < 1:
+            raise HttpError(400, "열 너비는 1 이상의 정수여야 합니다.")
     return config
 
 
@@ -1032,13 +1326,14 @@ def create_view(user, database_id: int, data: dict[str, Any]) -> dict[str, Any]:
         database=database,
         name=str(data["name"]).strip(),
         type=view_type,
-        filters=_normalize_filter_items(data.get("filters")),
+        filters=_normalize_filters(data.get("filters")),
         sorts=_normalize_sort_items(data.get("sorts")),
         config=validate_view_config(database, view_type, data.get("config") or {}),
         position=data.get("position") or 0,
     )
     if not view.name:
         raise HttpError(400, "보기 이름이 필요합니다.")
+    publish_workspace_event(database.workspace_id, "view", "created", view.id, user.id)
     return serialize_view(view)
 
 
@@ -1060,26 +1355,38 @@ def update_view(user, view_id: int, data: dict[str, Any]) -> dict[str, Any]:
     view.type = next_type
     view.config = validate_view_config(view.database, next_type, next_config)
     if "filters" in data and data["filters"] is not None:
-        view.filters = _normalize_filter_items(data["filters"])
+        view.filters = _normalize_filters(data["filters"])
     if "sorts" in data and data["sorts"] is not None:
         view.sorts = _normalize_sort_items(data["sorts"])
     if data.get("position") is not None:
         view.position = data["position"]
     view.save()
+    publish_workspace_event(view.database.workspace_id, "view", "updated", view.id, user.id)
     return serialize_view(view)
 
 
 @transaction.atomic
 def delete_view(user, view_id: int) -> None:
     view = get_view(user, view_id)
+    workspace_id = view.database.workspace_id
+    deleted_id = view.id
     view.delete()
+    publish_workspace_event(workspace_id, "view", "deleted", deleted_id, user.id)
 
 
 def delete_record_object(record: Record) -> None:
+    affected: set[tuple[int, int]] = set()
+    for link in RelationLink.objects.filter(Q(from_record=record) | Q(to_record=record)):
+        if link.from_record_id != record.id:
+            affected.add((link.property_id, link.from_record_id))
     for stored in PropertyValue.objects.filter(record=record):
         stored.delete()
     for link in RelationLink.objects.filter(Q(from_record=record) | Q(to_record=record)):
         link.delete()
+    for property_id, record_id in affected:
+        prop = Property.objects.filter(id=property_id).first()
+        if prop is not None:
+            _write_relation_ids(prop, record_id)
     for block in list(record.blocks.all()):
         block.delete()
     record.delete()
@@ -1118,6 +1425,7 @@ def create_record(user, database_id: int, data: dict[str, Any], source: str) -> 
     record.save(update_fields=["title", "last_edited_by", "updated_at"])
     after = _snapshot(record)
     log_activity(record, user, RecordActivity.Action.CREATED, {}, after, source)
+    publish_workspace_event(database.workspace_id, "record", "created", record.id, user.id)
     return serialize_record(record, include_blocks=True)
 
 
@@ -1142,13 +1450,19 @@ def update_record(user, record_id: int, data: dict[str, Any], source: str) -> di
     record.save(update_fields=["title", "last_edited_by", "updated_at"])
     after = _snapshot(record)
     log_activity(record, user, RecordActivity.Action.UPDATED, before, after, source)
+    publish_workspace_event(
+        record.database.workspace_id, "record", "updated", record.id, user.id
+    )
     return serialize_record(record, include_blocks=True)
 
 
 @transaction.atomic
 def delete_record(user, record_id: int) -> None:
     record = get_record(user, record_id)
+    workspace_id = record.database.workspace_id
+    deleted_id = record.id
     record.delete()
+    publish_workspace_event(workspace_id, "record", "deleted", deleted_id, user.id)
 
 
 def _block_parent(user, record: Record, parent_id: int | None) -> Block | None:
@@ -1157,6 +1471,15 @@ def _block_parent(user, record: Record, parent_id: int | None) -> Block | None:
     parent = get_block(user, parent_id)
     if parent.record_id != record.id:
         raise HttpError(400, "부모 블록이 같은 레코드에 있어야 합니다.")
+    return parent
+
+
+def _block_parent_for_page(user, page: Page, parent_id: int | None) -> Block | None:
+    if parent_id is None:
+        return None
+    parent = get_block(user, parent_id)
+    if parent.page_id != page.id:
+        raise HttpError(400, "부모 블록이 같은 페이지에 있어야 합니다.")
     return parent
 
 
@@ -1186,12 +1509,17 @@ def create_block(user, record_id: int, data: dict[str, Any], source: str) -> dic
     record.last_edited_by = user
     record.save(update_fields=["last_edited_by", "updated_at"])
     log_activity(record, user, RecordActivity.Action.UPDATED, before, _snapshot(record), source)
+    publish_workspace_event(
+        record.database.workspace_id, "block", "created", block.id, user.id
+    )
     return serialize_block(block)
 
 
 @transaction.atomic
 def update_block(user, block_id: int, data: dict[str, Any], source: str) -> dict[str, Any]:
     block = get_block(user, block_id)
+    if block.record_id is None:
+        return _update_page_block(user, block, data)
     record = block.record
     before = _snapshot(record)
     if data.get("type") is not None:
@@ -1210,12 +1538,44 @@ def update_block(user, block_id: int, data: dict[str, Any], source: str) -> dict
     record.last_edited_by = user
     record.save(update_fields=["last_edited_by", "updated_at"])
     log_activity(record, user, RecordActivity.Action.UPDATED, before, _snapshot(record), source)
+    publish_workspace_event(
+        record.database.workspace_id, "block", "updated", block.id, user.id
+    )
+    return serialize_block(block)
+
+
+def _update_page_block(user, block: Block, data: dict[str, Any]) -> dict[str, Any]:
+    page = block.page
+    if data.get("type") is not None:
+        block.type = _validate_block_type(str(data["type"]))
+    if data.get("content") is not None:
+        block.content = validate_block_content(block.type, data["content"], page.workspace_id)
+    if data.get("position") is not None:
+        block.position = data["position"]
+    if "parent_id" in data:
+        parent = _block_parent_for_page(user, page, data.get("parent_id"))
+        _reject_cycle(block, parent)
+        block.parent = parent
+    block.save()
+    publish_workspace_event(page.workspace_id, "block", "updated", block.id, user.id)
     return serialize_block(block)
 
 
 @transaction.atomic
 def delete_block(user, block_id: int, source: str) -> None:
     block = get_block(user, block_id)
+    if block.record_id is None:
+        page = block.page
+        deleted_id = block.id
+
+        def _walk(current: Block) -> None:
+            for child in list(current.children.all()):
+                _walk(child)
+            current.delete()
+
+        _walk(block)
+        publish_workspace_event(page.workspace_id, "block", "deleted", deleted_id, user.id)
+        return
     record = block.record
     before = _snapshot(record)
 
@@ -1228,6 +1588,9 @@ def delete_block(user, block_id: int, source: str) -> None:
     record.last_edited_by = user
     record.save(update_fields=["last_edited_by", "updated_at"])
     log_activity(record, user, RecordActivity.Action.UPDATED, before, _snapshot(record), source)
+    publish_workspace_event(
+        record.database.workspace_id, "block", "deleted", block_id, user.id
+    )
 
 
 def _properties_for_slug(databases: QuerySet[Database], slug: str) -> list[Property]:
@@ -1361,15 +1724,88 @@ def _matching_record_ids(prop: Property, op: str, value: Any) -> QuerySet:
     raise HttpError(400, "이 속성에는 쓸 수 없는 연산입니다.")
 
 
+def _apply_system_filter(qs: QuerySet, slug: str, op: str, value: Any, user) -> QuerySet:
+    if slug in SYSTEM_USER_FIELDS:
+        if value == "me":
+            value = user.id
+        elif isinstance(value, list):
+            value = [user.id if item == "me" else item for item in value]
+        field = f"{slug}_id"
+        if op == "is_empty":
+            return qs.filter(**{f"{field}__isnull": True})
+        if op == "eq":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise HttpError(400, "작성자 필터 값은 사용자 id여야 합니다.")
+            return qs.filter(**{field: value})
+        if op == "neq":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise HttpError(400, "작성자 필터 값은 사용자 id여야 합니다.")
+            return qs.exclude(**{field: value})
+        if op == "in":
+            if not isinstance(value, list):
+                raise HttpError(400, "in 연산의 값은 목록이어야 합니다.")
+            for item in value:
+                if isinstance(item, bool) or not isinstance(item, int):
+                    raise HttpError(400, "작성자 필터 값은 사용자 id여야 합니다.")
+            return qs.filter(**{f"{field}__in": value})
+        raise HttpError(400, "이 속성에는 쓸 수 없는 연산입니다.")
+    if op == "is_empty":
+        return qs.none()
+    if op == "neq":
+        return qs.exclude(**{slug: _parse_datetime(value)})
+    lookup = {
+        "eq": slug,
+        "gt": f"{slug}__gt",
+        "gte": f"{slug}__gte",
+        "lt": f"{slug}__lt",
+        "lte": f"{slug}__lte",
+    }.get(op)
+    if lookup is None:
+        raise HttpError(400, "이 속성에는 쓸 수 없는 연산입니다.")
+    return qs.filter(**{lookup: _parse_datetime(value)})
+
+
+def _apply_one_filter(qs: QuerySet, databases: QuerySet, item: dict, user) -> QuerySet:
+    slug = item["property"]
+    if slug in SYSTEM_FIELDS:
+        return _apply_system_filter(qs, slug, item["op"], item.get("value"), user)
+    props = _properties_for_slug(databases, slug)
+    query = Q()
+    for prop in props:
+        value = _resolve_filter_value(prop, item.get("value"), user)
+        query |= Q(id__in=_matching_record_ids(prop, item["op"], value).values("id"))
+    return qs.filter(id__in=Record.objects.filter(query).values("id"))
+
+
 def _apply_filters(qs: QuerySet, databases: QuerySet, filters: list[dict], user) -> QuerySet:
     for item in filters:
-        props = _properties_for_slug(databases, item["property"])
-        query = Q()
-        for prop in props:
-            value = _resolve_filter_value(prop, item.get("value"), user)
-            query |= Q(id__in=_matching_record_ids(prop, item["op"], value).values("id"))
-        qs = qs.filter(id__in=Record.objects.filter(query).values("id"))
+        qs = _apply_one_filter(qs, databases, item, user)
     return qs
+
+
+def _apply_filter_tree(qs: QuerySet, databases: QuerySet, node: Any, user) -> QuerySet:
+    if node is None or node == [] or node == {}:
+        return qs
+    if isinstance(node, list):
+        for item in node:
+            qs = _apply_filter_tree(qs, databases, item, user)
+        return qs
+    if isinstance(node, dict) and "filters" in node and "property" not in node:
+        if node.get("op") == "and":
+            for child in node["filters"]:
+                qs = _apply_filter_tree(qs, databases, child, user)
+            return qs
+        combined = Q()
+        for child in node["filters"]:
+            matched = _apply_filter_tree(
+                Record.objects.filter(database__in=databases),
+                databases,
+                child,
+                user,
+            )
+            combined |= Q(id__in=matched.values("id"))
+        return qs.filter(combined)
+    return _apply_one_filter(qs, databases, node, user)
 
 
 def _sort_field(props: list[Property]) -> str:
@@ -1390,12 +1826,12 @@ def query_records(user, data: dict[str, Any]) -> dict[str, Any]:
         raise HttpError(400, "페이지 값이 올바르지 않습니다.")
 
     databases = accessible_databases(user)
-    view_filters: list[dict] = []
+    view_filters: Any = []
     view_sorts: list[dict] = []
     if data.get("view_id"):
         view = get_view(user, int(data["view_id"]))
         databases = databases.filter(id=view.database_id)
-        view_filters = _normalize_filter_items(view.filters)
+        view_filters = _normalize_filters(view.filters)
         view_sorts = _normalize_sort_items(view.sorts)
     if data.get("database_id"):
         database = get_database(user, int(data["database_id"]))
@@ -1410,12 +1846,30 @@ def query_records(user, data: dict[str, Any]) -> dict[str, Any]:
     qs = Record.objects.filter(database__in=databases).select_related("database")
     keyword = (data.get("q") or "").strip()
     if keyword:
-        qs = qs.filter(title__icontains=keyword)
-    filters = view_filters + _normalize_filter_items(data.get("filters"))
-    qs = _apply_filters(qs, databases, filters, user)
+        value_ids = PropertyValue.objects.filter(
+            record__database__in=databases,
+            text_value__icontains=keyword,
+        ).values("record_id")
+        block_ids = (
+            Block.objects.annotate(_body=Cast("content", TextField()))
+            .filter(_body_keyword_query(keyword), record__database__in=databases)
+            .values("record_id")
+        )
+        qs = qs.filter(
+            Q(title__icontains=keyword) | Q(id__in=value_ids) | Q(id__in=block_ids)
+        )
+    qs = _apply_filter_tree(qs, databases, view_filters, user)
+    qs = _apply_filter_tree(qs, databases, _normalize_filters(data.get("filters")), user)
     sorts = _normalize_sort_items(data.get("sorts")) or view_sorts
     order: list[str] = []
     for index, item in enumerate(sorts):
+        if item["property"] in SYSTEM_FIELDS:
+            field = item["property"]
+            if field in SYSTEM_USER_FIELDS:
+                field = f"{field}_id"
+            prefix = "" if item["direction"] == "asc" else "-"
+            order.append(f"{prefix}{field}")
+            continue
         props = _properties_for_slug(databases, item["property"])
         annotation = f"_sort_{index}"
         subquery = Subquery(
@@ -1525,6 +1979,9 @@ def create_comment(user, record_id: int, data: dict[str, Any]) -> dict[str, Any]
         parent=parent,
         body=body,
     )
+    publish_workspace_event(
+        record.database.workspace_id, "comment", "created", comment.id, user.id
+    )
     return serialize_comment(comment)
 
 
@@ -1539,7 +1996,10 @@ def delete_comment(user, comment_id: int) -> None:
         raise HttpError(403, "댓글을 삭제할 권한이 없습니다.")
     for reply in RecordComment.objects.filter(parent=comment):
         reply.delete()
+    workspace_id = comment.record.database.workspace_id
+    deleted_id = comment.id
     comment.delete()
+    publish_workspace_event(workspace_id, "comment", "deleted", deleted_id, user.id)
 
 
 def serialize_template(template: DatabaseTemplate) -> dict[str, Any]:
@@ -1621,6 +2081,7 @@ def create_template(user, database_id: int, data: dict[str, Any]) -> dict[str, A
     database = get_database(user, database_id)
     cleaned = _clean_template_payload(database, data, partial=False)
     template = DatabaseTemplate.objects.create(database=database, **cleaned)
+    publish_workspace_event(database.workspace_id, "template", "created", template.id, user.id)
     return serialize_template(template)
 
 
@@ -1631,13 +2092,19 @@ def update_template(user, template_id: int, data: dict[str, Any]) -> dict[str, A
     for key, value in cleaned.items():
         setattr(template, key, value)
     template.save()
+    publish_workspace_event(
+        template.database.workspace_id, "template", "updated", template.id, user.id
+    )
     return serialize_template(template)
 
 
 @transaction.atomic
 def delete_template(user, template_id: int) -> None:
     template = get_template(user, template_id)
+    workspace_id = template.database.workspace_id
+    deleted_id = template.id
     template.delete()
+    publish_workspace_event(workspace_id, "template", "deleted", deleted_id, user.id)
 
 
 def list_trash(user, workspace_id: int) -> list[dict[str, Any]]:
@@ -1649,20 +2116,27 @@ def list_trash(user, workspace_id: int) -> list[dict[str, Any]]:
             database__deleted_at__isnull=True,
         )
         .select_related("database")
-        .order_by("-deleted_at", "-id")[:TRASH_LIMIT]
+        .order_by("-deleted_at", "-id")
     )
-    return [
+    items = [
         {
+            "kind": "record",
             "id": row.id,
             "title": row.title,
             "icon": row.icon,
             "database_id": row.database_id,
             "database_slug": row.database.slug,
             "database_name": row.database.name,
+            "page_kind": None,
             "deleted_at": row.deleted_at,
         }
         for row in rows
     ]
+    from workspace.tree import trash_pages
+
+    items.extend(trash_pages(workspace_id))
+    items.sort(key=lambda item: (item["deleted_at"], item["id"]), reverse=True)
+    return items[:TRASH_LIMIT]
 
 
 @transaction.atomic
@@ -1677,4 +2151,154 @@ def restore_record(user, record_id: int) -> dict[str, Any]:
     if not _membership_exists(user, record.database.workspace_id):
         raise HttpError(403, "워크스페이스에 접근할 수 없습니다.")
     record.restore()
+    publish_workspace_event(
+        record.database.workspace_id, "record", "restored", record.id, user.id
+    )
     return serialize_record(record, include_blocks=True)
+
+
+def _raw_values(record: Record) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    stored = (
+        PropertyValue.objects.filter(record=record)
+        .select_related("property")
+        .order_by("property__position", "property_id")
+    )
+    for item in stored:
+        if item.property.type == Property.Type.RELATION:
+            raw_ids = item.json_value if isinstance(item.json_value, list) else []
+            values[item.property.slug] = [
+                record_id
+                for record_id in raw_ids
+                if isinstance(record_id, int) and not isinstance(record_id, bool)
+            ]
+        else:
+            values[item.property.slug] = export_value(item)
+    return values
+
+
+def _copy_record_blocks(source: Record, target: Record) -> None:
+    blocks = list(source.blocks.order_by("position", "id"))
+
+    def _copy(parent_id: int | None, new_parent: Block | None) -> None:
+        for block in blocks:
+            if block.parent_id != parent_id:
+                continue
+            created = Block.objects.create(
+                record=target,
+                parent=new_parent,
+                type=block.type,
+                content=block.content or {},
+                position=block.position,
+            )
+            _copy(block.id, created)
+
+    _copy(None, None)
+
+
+@transaction.atomic
+def duplicate_record(user, record_id: int, source: str) -> dict[str, Any]:
+    original = get_record(user, record_id)
+    title = f"{original.title} 복사"[:300]
+    record = Record.objects.create(
+        database=original.database,
+        title=title,
+        icon=original.icon,
+        created_by=user,
+        last_edited_by=user,
+    )
+    values = _raw_values(original)
+    values[title_property(original.database).slug] = title
+    apply_values(record, values)
+    _copy_record_blocks(original, record)
+    record.save(update_fields=["title", "last_edited_by", "updated_at"])
+    log_activity(record, user, RecordActivity.Action.CREATED, {}, _snapshot(record), source)
+    publish_workspace_event(original.database.workspace_id, "record", "created", record.id, user.id)
+    return serialize_record(record, include_blocks=True)
+
+
+def _body_keyword_query(keyword: str) -> Q:
+    query = Q(_body__icontains=keyword)
+    escaped = json.dumps(keyword)[1:-1]
+    if escaped != keyword:
+        query |= Q(_body__icontains=escaped)
+    return query
+
+
+def _page_window(page: int, page_size: int) -> tuple[int, int]:
+    if page < 1 or page_size < 1 or page_size > MAX_PAGE_SIZE:
+        raise HttpError(400, "페이지 값이 올바르지 않습니다.")
+    return page, page_size
+
+
+def search_workspace(user, data: dict[str, Any]) -> dict[str, Any]:
+    page, page_size = _page_window(int(data.get("page") or 1), int(data.get("page_size") or 20))
+    workspace_id = int(data["workspace_id"])
+    get_membership(user, workspace_id)
+    keyword = str(data.get("q") or "").strip()
+    if not keyword:
+        raise HttpError(400, "검색어가 필요합니다.")
+    databases = accessible_databases(user).filter(workspace_id=workspace_id)
+    records = Record.objects.filter(database__in=databases).select_related("database")
+    value_ids = PropertyValue.objects.filter(
+        record__database__in=databases,
+        text_value__icontains=keyword,
+    ).values("record_id")
+    block_ids = (
+        Block.objects.annotate(_body=Cast("content", TextField()))
+        .filter(_body_keyword_query(keyword), record__database__in=databases)
+        .values("record_id")
+    )
+    records = records.filter(
+        Q(title__icontains=keyword) | Q(id__in=value_ids) | Q(id__in=block_ids)
+    ).order_by("-updated_at", "-id")
+    from workspace.models import Page
+
+    page_block_ids = (
+        Block.objects.annotate(_body=Cast("content", TextField()))
+        .filter(
+            _body_keyword_query(keyword),
+            page__workspace_id=workspace_id,
+            page__kind=Page.Kind.DOCUMENT,
+        )
+        .values("page_id")
+    )
+    documents = Page.objects.filter(workspace_id=workspace_id, kind=Page.Kind.DOCUMENT).filter(
+        Q(name__icontains=keyword) | Q(id__in=page_block_ids)
+    ).order_by("-updated_at", "-id")
+    need = page * page_size
+    record_rows = list(records[:need])
+    document_rows = list(documents[:need])
+    hits: list[dict[str, Any]] = [
+        {
+            "kind": "record",
+            "id": row.id,
+            "title": row.title,
+            "database_id": row.database_id,
+            "database_slug": row.database.slug,
+            "updated_at": row.updated_at,
+        }
+        for row in record_rows
+    ]
+    hits.extend(
+        {
+            "kind": "page",
+            "id": row.id,
+            "title": row.name,
+            "database_id": None,
+            "database_slug": "",
+            "updated_at": row.updated_at,
+        }
+        for row in document_rows
+    )
+    hits.sort(key=lambda item: (item["updated_at"], item["id"]), reverse=True)
+    start = (page - 1) * page_size
+    window = hits[start : start + page_size]
+    for item in window:
+        item.pop("updated_at", None)
+    return {
+        "count": records.count() + documents.count(),
+        "page": page,
+        "page_size": page_size,
+        "data": window,
+    }

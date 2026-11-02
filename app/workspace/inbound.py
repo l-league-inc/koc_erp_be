@@ -63,7 +63,7 @@ class PropertyUpdateSchema(Schema):
 class ViewWriteSchema(Schema):
     name: str
     type: str = "table"
-    filters: list[dict] = Field(default_factory=list)
+    filters: Any = Field(default_factory=list)
     sorts: list[dict] = Field(default_factory=list)
     config: dict = Field(default_factory=dict)
     position: int = 0
@@ -72,7 +72,7 @@ class ViewWriteSchema(Schema):
 class ViewUpdateSchema(Schema):
     name: Optional[str] = None
     type: Optional[str] = None
-    filters: Optional[list[dict]] = None
+    filters: Any = None
     sorts: Optional[list[dict]] = None
     config: Optional[dict] = None
     position: Optional[int] = None
@@ -161,11 +161,42 @@ class RecordQuerySchema(Schema):
         None,
         description="보기 id. 이 보기의 필터를 요청 필터보다 먼저 적용합니다.",
     )
-    q: Optional[str] = Field(None, description="제목 검색어")
-    filters: list[RecordFilterSchema] = Field(default_factory=list, description="속성 필터")
+    q: Optional[str] = Field(None, description="제목, 속성 텍스트, 블록 본문 검색어")
+    filters: Any = Field(default_factory=list, description="속성 필터. 목록은 AND이고, 그룹은 and 또는 or입니다.")
     sorts: list[RecordSortSchema] = Field(default_factory=list, description="정렬")
     page: int = Field(1, ge=1, description="페이지 번호")
     page_size: int = Field(20, ge=1, le=100, description="페이지 크기. 상한은 100입니다.")
+
+
+class PageCreateSchema(Schema):
+    kind: str
+    name: str
+    slug: str = ""
+    icon: str = ""
+    parent_id: Optional[int] = None
+    position: int = 0
+    database_id: Optional[int] = None
+    view_id: Optional[int] = None
+
+
+class PageUpdateSchema(Schema):
+    name: Optional[str] = None
+    slug: Optional[str] = None
+    icon: Optional[str] = None
+    position: Optional[int] = None
+    view_id: Optional[int] = None
+
+
+class PageMoveSchema(Schema):
+    parent_id: Optional[int] = None
+    position: Optional[int] = None
+
+
+class SearchSchema(Schema):
+    workspace_id: int
+    q: str
+    page: int = Field(1, ge=1)
+    page_size: int = Field(20, ge=1, le=100)
 
 
 BlockWriteSchema.model_rebuild()

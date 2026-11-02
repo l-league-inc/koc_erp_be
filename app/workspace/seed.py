@@ -229,4 +229,7 @@ def seed_koc_workspace() -> Workspace:
             )
         _ensure_properties(database, spec["properties"])
         _ensure_views(database)
+        from workspace.tree import ensure_database_page
+
+        ensure_database_page(database)
     return workspace

@@ -10,11 +10,15 @@ from workspace.inbound import (
     CommentCreateSchema,
     DatabaseCreateSchema,
     DatabaseUpdateSchema,
+    PageCreateSchema,
+    PageMoveSchema,
+    PageUpdateSchema,
     PropertyCreateSchema,
     PropertyUpdateSchema,
     RecordCreateSchema,
     RecordQuerySchema,
     RecordUpdateSchema,
+    SearchSchema,
     TemplateUpdateSchema,
     TemplateWriteSchema,
     ViewUpdateSchema,
@@ -32,10 +36,30 @@ from workspace.outbound import (
     RecordDetailResponseSchema,
     RecordQueryResponseSchema,
     TemplateResponseSchema,
+    FavoriteResponseSchema,
+    PageDetailResponseSchema,
+    PageResponseSchema,
+    SearchResponseSchema,
     TrashRecordResponseSchema,
     ViewResponseSchema,
     WorkspaceMemberResponseSchema,
     WorkspaceResponseSchema,
+)
+from workspace.tree import (
+    create_page,
+    create_page_block,
+    delete_page,
+    duplicate_page,
+    favorite_page,
+    get_page,
+    list_favorites,
+    list_page_blocks,
+    list_pages,
+    move_page,
+    restore_page,
+    serialize_page,
+    unfavorite_page,
+    update_page,
 )
 from workspace.utils import (
     activity_source,
@@ -62,7 +86,9 @@ from workspace.utils import (
     list_templates,
     list_trash,
     list_workspaces,
+    duplicate_record,
     query_records,
+    search_workspace,
     serialize_block,
     serialize_database,
     serialize_property,
@@ -551,6 +577,186 @@ async def create_comment_api(request, record_id: int, payload: CommentCreateSche
 async def delete_comment_api(request, comment_id: int):
     await sync_to_async(delete_comment)(request.auth, comment_id)
     return 204, None
+
+
+@router.post(
+    "/record/{record_id}/duplicate",
+    summary="[C] 레코드 복제",
+    description="레코드의 제목, 값, 관계, 블록을 복사합니다. 댓글과 활동은 복사하지 않습니다.",
+    response={201: RecordDetailResponseSchema},
+    auth=jwt_auth,
+)
+async def duplicate_record_api(request, record_id: int):
+    record = await sync_to_async(duplicate_record)(
+        request.auth, record_id, activity_source(request)
+    )
+    return 201, record
+
+
+@router.post(
+    "/search",
+    summary="[C] 워크스페이스 검색",
+    description="레코드와 문서 페이지를 제목, 속성 텍스트, 블록 본문으로 찾습니다.",
+    response=SearchResponseSchema,
+    auth=jwt_auth,
+)
+async def search_workspace_api(request, payload: SearchSchema):
+    return await sync_to_async(search_workspace)(request.auth, _dump(payload))
+
+
+@router.get(
+    "/{workspace_id}/page",
+    summary="[C] 페이지 목록 조회",
+    description="사이드바 페이지를 position, id 순의 평탄 목록으로 돌려줍니다.",
+    response=list[PageResponseSchema],
+    auth=jwt_auth,
+)
+async def list_page_api(request, workspace_id: int):
+    return await sync_to_async(list_pages)(request.auth, workspace_id)
+
+
+@router.post(
+    "/{workspace_id}/page",
+    summary="[C] 페이지 생성",
+    description="폴더, 문서, 연결 보기를 만듭니다. 데이터베이스 페이지는 데이터베이스를 만들면 생깁니다.",
+    response={201: PageDetailResponseSchema},
+    auth=jwt_auth,
+)
+async def create_page_api(request, workspace_id: int, payload: PageCreateSchema):
+    page = await sync_to_async(create_page)(request.auth, workspace_id, _dump(payload))
+    return 201, page
+
+
+@router.get(
+    "/{workspace_id}/favorite",
+    summary="[C] 즐겨찾기 조회",
+    description="호출자가 즐겨찾기한 페이지를 조회합니다.",
+    response=list[FavoriteResponseSchema],
+    auth=jwt_auth,
+)
+async def list_favorite_api(request, workspace_id: int):
+    return await sync_to_async(list_favorites)(request.auth, workspace_id)
+
+
+@router.get(
+    "/page/{page_id}",
+    summary="[C] 페이지 상세 조회",
+    description="페이지를 조회합니다. 문서는 블록을 함께 돌려줍니다.",
+    response=PageDetailResponseSchema,
+    auth=jwt_auth,
+)
+async def get_page_api(request, page_id: int):
+    @sync_to_async
+    def _get():
+        return serialize_page(get_page(request.auth, page_id), include_blocks=True)
+
+    return await _get()
+
+
+@router.patch(
+    "/page/{page_id}",
+    summary="[C] 페이지 수정",
+    description="페이지 이름, 아이콘, 순서, 폴더 키를 수정합니다.",
+    response=PageDetailResponseSchema,
+    auth=jwt_auth,
+)
+async def update_page_api(request, page_id: int, payload: PageUpdateSchema):
+    return await sync_to_async(update_page)(
+        request.auth, page_id, _dump(payload, exclude_unset=True)
+    )
+
+
+@router.post(
+    "/page/{page_id}/move",
+    summary="[C] 페이지 이동",
+    description="페이지의 부모와 순서를 바꿉니다. 자신의 하위로는 옮길 수 없습니다.",
+    response=PageResponseSchema,
+    auth=jwt_auth,
+)
+async def move_page_api(request, page_id: int, payload: PageMoveSchema):
+    return await sync_to_async(move_page)(request.auth, page_id, _dump(payload))
+
+
+@router.delete(
+    "/page/{page_id}",
+    summary="[C] 페이지 삭제",
+    description="폴더, 문서, 연결 보기는 휴지통으로 옮깁니다. 데이터베이스 페이지는 데이터베이스와 함께 지웁니다.",
+    response={204: None},
+    auth=jwt_auth,
+)
+async def delete_page_api(request, page_id: int):
+    await sync_to_async(delete_page)(request.auth, page_id)
+    return 204, None
+
+
+@router.post(
+    "/page/{page_id}/restore",
+    summary="[C] 페이지 복원",
+    description="휴지통의 폴더, 문서, 연결 보기를 복원합니다.",
+    response=PageDetailResponseSchema,
+    auth=jwt_auth,
+)
+async def restore_page_api(request, page_id: int):
+    return await sync_to_async(restore_page)(request.auth, page_id)
+
+
+@router.post(
+    "/page/{page_id}/duplicate",
+    summary="[C] 문서 페이지 복제",
+    description="문서 페이지와 블록을 같은 부모 아래에 복사합니다.",
+    response={201: PageDetailResponseSchema},
+    auth=jwt_auth,
+)
+async def duplicate_page_api(request, page_id: int):
+    page = await sync_to_async(duplicate_page)(request.auth, page_id)
+    return 201, page
+
+
+@router.post(
+    "/page/{page_id}/favorite",
+    summary="[C] 페이지 즐겨찾기",
+    description="페이지를 즐겨찾기에 넣습니다.",
+    response={201: FavoriteResponseSchema},
+    auth=jwt_auth,
+)
+async def favorite_page_api(request, page_id: int):
+    favorite = await sync_to_async(favorite_page)(request.auth, page_id)
+    return 201, favorite
+
+
+@router.delete(
+    "/page/{page_id}/favorite",
+    summary="[C] 페이지 즐겨찾기 해제",
+    description="즐겨찾기에서 페이지를 뺍니다.",
+    response={204: None},
+    auth=jwt_auth,
+)
+async def unfavorite_page_api(request, page_id: int):
+    await sync_to_async(unfavorite_page)(request.auth, page_id)
+    return 204, None
+
+
+@router.get(
+    "/page/{page_id}/block",
+    summary="[C] 문서 블록 조회",
+    description="문서 페이지의 블록을 조회합니다.",
+    response=list[BlockResponseSchema],
+    auth=jwt_auth,
+)
+async def list_page_block_api(request, page_id: int):
+    return await sync_to_async(list_page_blocks)(request.auth, page_id)
+
+
+@router.post(
+    "/page/{page_id}/block",
+    summary="[C] 문서 블록 생성",
+    description="문서 페이지에 블록을 추가합니다.",
+    response={201: BlockResponseSchema},
+    auth=jwt_auth,
+)
+async def create_page_block_api(request, page_id: int, payload: BlockCreateSchema):
+    block = await sync_to_async(create_page_block)(request.auth, page_id, _dump(payload))
+    return 201, block
 
 
 @router.post(

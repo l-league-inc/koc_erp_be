@@ -4,6 +4,8 @@ from workspace.models import (
     Block,
     Database,
     DatabaseTemplate,
+    Page,
+    PageFavorite,
     Property,
     PropertyValue,
     Record,
@@ -57,9 +59,21 @@ class RelationLinkAdmin(admin.ModelAdmin):
     list_display = ["id", "property", "from_record", "to_record"]
 
 
+@admin.register(Page)
+class PageAdmin(admin.ModelAdmin):
+    list_display = ["id", "workspace", "kind", "name", "parent", "position"]
+    list_filter = ["kind", "workspace"]
+    search_fields = ["name", "slug"]
+
+
+@admin.register(PageFavorite)
+class PageFavoriteAdmin(admin.ModelAdmin):
+    list_display = ["id", "user", "page", "position"]
+
+
 @admin.register(Block)
 class BlockAdmin(admin.ModelAdmin):
-    list_display = ["id", "record", "type", "position", "parent"]
+    list_display = ["id", "record", "page", "type", "position", "parent"]
 
 
 @admin.register(View)

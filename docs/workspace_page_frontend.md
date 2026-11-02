@@ -175,10 +175,41 @@ audience: frontend
 - 캘린더 칸은 `config.date_property`로 넣고, 월이 바뀌면 날짜 필터를 다시 조회한다.
 - 템플릿으로 만들 때는 `template_id`만 보내고, 사용자가 고친 칸만 추가로 보낸다.
 - 행 삭제 후 휴지통에서 복원하면 상세를 다시 연다.
+- 사이드바 트리는 `parent_id`로 만들고, 데이터베이스 페이지를 폴더로 옮기면 `section_slug`도 그 폴더를 따른다.
+- `workspace_changed`를 받으면 본문 없이 해당 `entity`를 다시 조회한다.
+- 숨긴 열은 `config.hidden_properties`를 따른다. 제목은 숨기지 않는다.
+
+## 페이지 트리
+
+`GET /{workspace_id}/page`는 평탄 목록입니다. `parent_id`로 트리를 만듭니다. `kind`는 `folder`, `document`, `database`, `linked_view`입니다.
+
+`POST /{workspace_id}/page`로 폴더, 문서, 연결 보기를 만듭니다. 폴더는 `slug`가 필요합니다. 연결 보기는 `database_id`와 선택 `view_id`만 가리키고 행을 복사하지 않습니다. 데이터베이스 페이지는 `POST /database`가 만듭니다.
+
+`POST /page/{page_id}/move`는 `{parent_id, position}`입니다. `parent_id`가 비면 루트입니다. 자기 자손 아래는 400입니다. 데이터베이스 페이지의 직계 부모가 폴더이면 `Database.section`과 `section_slug`가 그 폴더를 따릅니다.
+
+문서 블록은 `GET|POST /page/{page_id}/block`이고 모양은 레코드 블록과 같습니다. `POST /page/{page_id}/duplicate`는 같은 부모 아래에 블록을 복사합니다.
+
+`POST /page/{page_id}/favorite`, `DELETE /page/{page_id}/favorite`, `GET /{workspace_id}/favorite`.
+
+폴더, 문서, 연결 보기를 지우면 휴지통 항목의 `kind`가 `page`입니다. `page_kind`로 구분하고 `POST /page/{page_id}/restore`로 되돌립니다. 데이터베이스 페이지 삭제는 휴지통에 나오지 않습니다. 레코드 휴지통 항목의 `kind`는 `record`입니다.
+
+## 보기 설정
+
+`config.hidden_properties`는 숨길 속성 slug 배열입니다. 제목은 넣을 수 없습니다. `config.column_widths`는 slug별 1 이상의 정수입니다. 표의 `config.group_by`는 선택, 상태, 다중 선택입니다. 없으면 그룹이 없습니다. 행을 묶는 일은 프론트가 합니다.
+
+## 변경 알림
+
+멤버는 쿠키 JWT로 `ws/workspace/{workspace_id}/`에 연결합니다. 저장이 커밋되면 다음 이벤트만 옵니다.
+
+```json
+{"type":"workspace_changed","workspace_id":1,"entity":"record","action":"updated","id":12,"actor_id":3}
+```
+
+`entity`는 `record`, `block`, `comment`, `database`, `property`, `view`, `page`, `template`입니다. 본문은 없습니다. 이벤트를 받으면 기존 GET으로 다시 조회합니다. 알림 소켓 `ws/notification/{user_id}/`와는 별개입니다.
 
 ## 비범위
 
-- 수식, 롤업, 버튼, Notion.com 동기화, 실시간 커서
+- 수식, 롤업, 버튼, Notion.com 동기화, 실시간 커서, 글자 단위 동시 편집
 - 데이터베이스마다 다른 권한. 멤버는 페이지를 읽고 쓸 수 있다.
 - 댓글 서식과 멘션. 댓글 본문은 일반 텍스트다.
 - 블록 단위 휴지통

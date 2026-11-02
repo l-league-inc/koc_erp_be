@@ -10,7 +10,7 @@ from ninja.errors import HttpError
 
 from assistant import llm, skillbook
 from assistant.models import AgentMessage, AgentSession, ProposedAction
-from workspace.models import RecordActivity
+from workspace.models import Property, RecordActivity
 from workspace.utils import (
     accessible_databases,
     create_record,
@@ -235,6 +235,33 @@ def _scoped_slug(session: AgentSession, requested: str) -> str:
     return cleaned or session.database_slug
 
 
+def _related_slugs(user, session: AgentSession) -> set[str]:
+    if not session.database_slug:
+        return set()
+    database = _database(user, session.workspace_id, session.database_slug)
+    target_ids: list[int] = []
+    for prop in database.properties.filter(type=Property.Type.RELATION):
+        raw = (prop.config or {}).get("database_id")
+        if isinstance(raw, int) and not isinstance(raw, bool):
+            target_ids.append(raw)
+    if not target_ids:
+        return set()
+    return set(
+        accessible_databases(user)
+        .filter(workspace_id=session.workspace_id, id__in=target_ids)
+        .values_list("slug", flat=True)
+    )
+
+
+def _read_slug(user, session: AgentSession, requested: str) -> str:
+    cleaned = (requested or "").strip()
+    if not session.database_slug or not cleaned or cleaned == session.database_slug:
+        return cleaned or session.database_slug
+    if cleaned in _related_slugs(user, session):
+        return cleaned
+    raise HttpError(400, "이 대화는 선택한 영역만 다룹니다.")
+
+
 def list_sessions(user, workspace_id: int | None) -> list[dict[str, Any]]:
     sessions = AgentSession.objects.filter(user=user)
     if workspace_id is not None:
@@ -291,9 +318,11 @@ def _system_prompt(session: AgentSession, user) -> str:
     return (
         "당신은 KOC 워크스페이스 업무 도우미입니다. "
         f"워크스페이스 id는 {session.workspace_id}이고 범위는 {scope}입니다. "
-        f"오늘 날짜는 {timezone.now().date().isoformat()}이고 사용자 id는 {user.id}입니다. "
+        f"오늘 날짜는 {timezone.now().date().isoformat()}이고 "
+        f"사용자 id는 {user.id}이며 이메일은 {user.email}입니다. "
         "멤버, 스키마, 레코드는 도구로 조회합니다. "
-        "담당자는 list_members의 user_id를 사용합니다. "
+        "페이지 데이터베이스의 임직원 칸은 employees 레코드 id 배열입니다. "
+        "people 속성에만 list_members의 user_id를 사용합니다. "
         "아래는 스킬 이름과 설명입니다. 본문은 포함되어 있지 않습니다. "
         "사용자 문장이 설명과 맞으면 view_skill로 전문을 읽고 그 절차를 따릅니다. "
         "레코드나 스킬을 만들거나 고칠 때는 propose 도구만 사용하고, 저장이 끝났다고 말하지 않습니다.\n"
@@ -307,15 +336,17 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
     if name == "list_databases":
         databases = accessible_databases(user).filter(workspace_id=session.workspace_id)
         if session.database_slug:
-            databases = databases.filter(slug=session.database_slug)
+            databases = databases.filter(
+                slug__in={session.database_slug, *_related_slugs(user, session)}
+            )
         return [serialize_database(database) for database in databases.order_by("position", "id")]
     if name == "get_database_schema":
-        slug = _scoped_slug(session, str(arguments.get("database_slug") or ""))
+        slug = _read_slug(user, session, str(arguments.get("database_slug") or ""))
         if not slug:
             raise HttpError(400, "영역 slug가 필요합니다.")
         return serialize_database(_database(user, session.workspace_id, slug), detail=True)
     if name == "query_records":
-        slug = _scoped_slug(session, str(arguments.get("database_slug") or ""))
+        slug = _read_slug(user, session, str(arguments.get("database_slug") or ""))
         filters = arguments.get("filters") or []
         keyword = str(arguments.get("q") or "")
         if slug:

@@ -11,7 +11,7 @@ from assistant.agent import _dispatch
 from assistant.api import agent_router
 from assistant.models import AgentSession, Skill
 from user.utils import get_access_token
-from workspace.models import Record, RecordActivity
+from workspace.models import Database, Property, Record, RecordActivity, Workspace
 from workspace.seed import seed_koc_workspace
 
 User = get_user_model()
@@ -55,6 +55,21 @@ class AgentApiTests(TestCase):
         user = user or self.user
         token, _expires = get_access_token({"user_id": user.id, "env": settings.DJANGO_ENV_NAME})
         return {"Authorization": f"Bearer {token}"}
+
+    def _ensure_database(self, workspace_id: int, slug: str, name: str) -> Database:
+        workspace = Workspace.objects.get(id=workspace_id)
+        return Database.objects.create(workspace=workspace, name=name, slug=slug)
+
+    def _link_attendance(self, workspace_id: int) -> None:
+        employees = self._ensure_database(workspace_id, "employees", "임직원")
+        attendance = self._ensure_database(workspace_id, "attendance", "근무 기록")
+        Property.objects.create(
+            database=attendance,
+            name="임직원",
+            slug="employee",
+            type=Property.Type.RELATION,
+            config={"database_id": employees.id},
+        )
 
     async def _workspace_id(self) -> int:
         from workspace.api import router as workspace_router
@@ -131,6 +146,7 @@ class AgentApiTests(TestCase):
 
     async def test_attendance_skill_is_loaded_before_draft(self):
         workspace_id = await self._workspace_id()
+        await sync_to_async(self._ensure_database)(workspace_id, "attendance", "근무 기록")
         created = await self.client.post(
             "/session",
             json={"workspace_id": workspace_id},
@@ -142,6 +158,7 @@ class AgentApiTests(TestCase):
             tool_messages = [item for item in messages if item.get("role") == "tool"]
             if not tool_messages:
                 self.assertIn("attendance", messages[0]["content"])
+                self.assertIn(self.user.email, messages[0]["content"])
                 self.assertNotIn("# 출근", messages[0]["content"])
                 return {
                     "content": "",
@@ -155,6 +172,8 @@ class AgentApiTests(TestCase):
                 }
             if len(tool_messages) == 1:
                 self.assertIn("propose_create_record", tool_messages[0]["content"])
+                self.assertIn("employees", tool_messages[0]["content"])
+                self.assertIn("`employee`", tool_messages[0]["content"])
                 return {
                     "content": "",
                     "tool_calls": [
@@ -162,9 +181,9 @@ class AgentApiTests(TestCase):
                             "id": "call_create",
                             "name": "propose_create_record",
                             "arguments": {
-                                "database_slug": "hr",
-                                "title": "출근",
-                                "values": {"status": "출근", "kind": "출근"},
+                                "database_slug": "attendance",
+                                "title": "2026-11-01 출근",
+                                "values": {"work_date": "2026-11-01", "employee": [1]},
                             },
                         }
                     ],
@@ -179,7 +198,59 @@ class AgentApiTests(TestCase):
             )
         self.assertEqual(message.status_code, 200, message.json())
         self.assertEqual(message.json()["proposed_actions"][0]["kind"], "create_record")
-        self.assertEqual(message.json()["proposed_actions"][0]["payload"]["database_slug"], "hr")
+        self.assertEqual(
+            message.json()["proposed_actions"][0]["payload"]["database_slug"],
+            "attendance",
+        )
+
+    async def test_scoped_session_can_read_related_databases(self):
+        workspace_id = await self._workspace_id()
+        await sync_to_async(self._link_attendance)(workspace_id)
+        created = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id, "database_slug": "attendance"},
+            headers=self.headers(),
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        session = await sync_to_async(AgentSession.objects.get)(id=created.json()["id"])
+
+        schema = await sync_to_async(_dispatch)(
+            session,
+            self.user,
+            "get_database_schema",
+            {"database_slug": "employees"},
+            [],
+        )
+        self.assertEqual(schema["slug"], "employees")
+        listed = await sync_to_async(_dispatch)(session, self.user, "list_databases", {}, [])
+        self.assertEqual({item["slug"] for item in listed}, {"attendance", "employees"})
+        queried = await sync_to_async(_dispatch)(
+            session,
+            self.user,
+            "query_records",
+            {"database_slug": "employees"},
+            [],
+        )
+        self.assertEqual(queried["count"], 0)
+
+        with self.assertRaises(HttpError) as caught:
+            await sync_to_async(_dispatch)(
+                session,
+                self.user,
+                "query_records",
+                {"database_slug": "hr"},
+                [],
+            )
+        self.assertEqual(caught.exception.status_code, 400)
+        with self.assertRaises(HttpError) as caught:
+            await sync_to_async(_dispatch)(
+                session,
+                self.user,
+                "propose_create_record",
+                {"database_slug": "employees", "title": "임직원"},
+                [],
+            )
+        self.assertEqual(caught.exception.status_code, 400)
 
     async def test_skill_draft_is_saved_on_confirm(self):
         workspace_id = await self._workspace_id()

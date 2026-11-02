@@ -19,7 +19,7 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 
 ## 영역
 
-아래 여섯 개는 `python manage.py seed_koc_workspace`가 만드는 스킬용 데이터베이스입니다. `section`은 빈 문자열입니다. CSV 기본 페이지는 [koc_pages_frontend.md](koc_pages_frontend.md)입니다.
+아래 여섯 개는 `python manage.py seed_koc_workspace`가 만듭니다. `section`은 빈 문자열입니다. 고정 스킬은 이 여섯 개가 아니라 CSV 페이지 데이터베이스를 씁니다. 출근은 `attendance`, 일정은 `tasks`, 견적은 `quotes`, 출장은 `trip`, A/S는 `after_service`입니다. CSV 기본 페이지는 [koc_pages_frontend.md](koc_pages_frontend.md)입니다.
 
 | slug | 화면 | 주요 속성 |
 |------|------|-----------|

@@ -8,7 +8,7 @@ KOC 워크스페이스의 데이터 원본은 Django입니다. Notion.com과 동
 |------|------|
 | `Workspace` | 회사 공간. 슬러그 `koc`가 기본 시드 |
 | `WorkspaceMember` | `owner` / `admin` / `member`. 이름 조회는 `GET /{workspace_id}/member` |
-| `Database` | 업무 데이터베이스. `section`은 페이지 이름, `section_slug`는 페이지 키. 스킬용 슬러그는 `hr`, `daily`, `gov`, `purchase`, `sales`, `docs` |
+| `Database` | 업무 데이터베이스. `section`은 페이지 이름, `section_slug`는 페이지 키. `seed_koc_workspace` 슬러그는 `hr`, `daily`, `gov`, `purchase`, `sales`, `docs` |
 | `Property` | 컬럼. 데이터베이스마다 `title` 타입은 하나 |
 | `Record` | 행이자 페이지. `title`은 제목 속성과 같이 저장되고 `icon`은 페이지 아이콘 |
 | `PropertyValue` | 타입별 값. `(record, property)`는 삭제되지 않은 행만 유니크 |
@@ -23,10 +23,10 @@ KOC 워크스페이스의 데이터 원본은 Django입니다. Notion.com과 동
 
 시드 명령은 두 개입니다. 둘 다 워크스페이스 `koc`를 없으면 만들고, 활성(`status=A`) 사용자를 멤버로 넣습니다. 이미 있는 데이터베이스와 속성은 덮어쓰지 않습니다. 같은 제목의 레코드도 다시 만들지 않습니다.
 
-- `python manage.py seed_koc_workspace`: 에이전트 스킬이 쓰는 여섯 영역. `section`은 비어 있습니다. 담당은 `people`이고 사용자 id입니다.
+- `python manage.py seed_koc_workspace`: 단순 여섯 영역. `section`은 비어 있습니다. 담당은 `people`이고 사용자 id입니다. 고정 스킬은 이 영역을 쓰지 않습니다.
 - `python manage.py seed_koc_pages`: CSV 원본은 `app/workspace/fixtures/koc/`입니다. 데이터베이스 13개를 `section`으로 여섯 페이지에 묶고, 값이 있는 행을 레코드로 넣습니다. 프론트 속성 표는 [koc_pages_frontend.md](koc_pages_frontend.md)입니다.
 
-`seed_koc_pages`의 페이지 키는 `hr`, `daily`, `gov`, `purchase`, `sales`, `docs`입니다. 이 키는 스킬용 데이터베이스 slug와 글자가 같고, 데이터는 다릅니다. 스킬용 `hr`의 담당은 멤버 id이고, CSV `attendance.employee`는 임직원 레코드 관계입니다.
+`seed_koc_pages`의 페이지 키는 `hr`, `daily`, `gov`, `purchase`, `sales`, `docs`입니다. 이 키는 `seed_koc_workspace` 데이터베이스 slug와 글자가 같고, 데이터는 다릅니다. 그 `hr`의 담당은 멤버 id이고, CSV `attendance.employee`는 임직원 레코드 관계입니다. 고정 스킬은 CSV 데이터베이스를 씁니다. 출근은 `attendance`, 일정은 `tasks`, 견적은 `quotes`, 출장은 `trip`, A/S는 `after_service`입니다.
 
 관계 대상은 세 데이터베이스입니다.
 

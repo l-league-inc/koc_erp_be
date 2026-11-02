@@ -9,6 +9,8 @@ audience: frontend
 
 모델 호출은 서버가 합니다. 프롬프트에는 스킬 이름과 설명만 들어가고, 맞는 스킬의 절차는 그때 읽습니다. 레코드와 스킬의 생성·수정은 초안으로 돌아오고, 사용자가 확정한 뒤에만 저장됩니다.
 
+고정 스킬이 만드는 레코드 초안의 `database_slug`는 출근 `attendance`, 일정 `tasks`, 견적 `quotes`, 출장 `trip`, A/S `after_service`입니다. 임직원·거래처 칸은 그 레코드 id 배열입니다. 대화 `database_slug`가 한 영역이면 조회는 그 영역의 관계 대상까지 되고, 생성 초안은 그 영역만 됩니다.
+
 ## 유저 플로우
 
 1. 화면을 다시 열면 `GET /api/v1/agent/session`으로 최근 대화를 가져옵니다. `preview`는 마지막 메시지입니다.
@@ -43,7 +45,7 @@ audience: frontend
 {"action_ids": [1]}
 ```
 
-초안 `kind`는 `create_record`, `update_record`, `create_skill`, `update_skill`입니다. 레코드 `payload`는 워크스페이스 레코드 생성·수정과 같은 쓰기 모양이고, 생성은 `database_slug`를 포함합니다. 관계 값은 레코드 id 배열입니다. 서버가 조회 도구로 읽는 관계 값은 `{id, title, database_id, database_slug}`이지만, 이 조회 결과는 화면 초안에 실리지 않습니다. 확정 뒤 레코드를 다시 조회하면 읽기 모양이 나옵니다. 담당 값은 `GET /api/v1/workspace/{workspace_id}/member`의 `user_id`입니다.
+초안 `kind`는 `create_record`, `update_record`, `create_skill`, `update_skill`입니다. 레코드 `payload`는 워크스페이스 레코드 생성·수정과 같은 쓰기 모양이고, 생성은 `database_slug`를 포함합니다. 관계 값은 레코드 id 배열입니다. 서버가 조회 도구로 읽는 관계 값은 `{id, title, database_id, database_slug}`이지만, 이 조회 결과는 화면 초안에 실리지 않습니다. 확정 뒤 레코드를 다시 조회하면 읽기 모양이 나옵니다. 페이지 데이터베이스의 임직원·거래처 칸도 레코드 id 배열입니다. `seed_koc_workspace` 여섯 영역의 `owner`만 `GET /api/v1/workspace/{workspace_id}/member`의 `user_id` 배열입니다.
 
 스킬 생성 `payload`는 `name`, `description`, `body`, `enabled`입니다. 수정 `payload`는 `name`과 바뀐 `description`, `body`, `enabled`입니다. `name`은 영문 소문자로 시작하고 숫자와 `_`만 씁니다. 고정 스킬 이름 `attendance`, `schedule`, `quote`, `travel`, `after_service`는 만들거나 고칠 수 없습니다.
 

@@ -39,5 +39,6 @@ applyTo: "**"
 | [workspace_frontend.md](../docs/workspace_frontend.md) | KOC 워크스페이스 데이터베이스·레코드·조회 계약 |
 | [koc_pages_frontend.md](../docs/koc_pages_frontend.md) | 기본 페이지 묶음, CSV 데이터베이스 속성, 통합관리대장 |
 | [workspace_page_frontend.md](../docs/workspace_page_frontend.md) | 페이지 아이콘, 서식 블록, 댓글, 활동, 보기, 템플릿, 휴지통 |
+| [workspace_realtime_frontend.md](../docs/workspace_realtime_frontend.md) | 워크스페이스 WebSocket 변경 알림 |
 | [agent_frontend.md](../docs/agent_frontend.md) | 앱 안 업무 대화, 스킬, 초안 확정 |
 | [workbot_frontend.md](../docs/workbot_frontend.md) | 워크봇 저장, 실행, 통계 |

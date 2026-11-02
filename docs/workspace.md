@@ -21,7 +21,7 @@ KOC 워크스페이스의 데이터 원본은 Django입니다. Notion.com과 동
 | `RecordComment` | 레코드 댓글. 답글은 한 단계 |
 | `DatabaseTemplate` | 새 레코드에 복사할 제목, 값, 블록 |
 
-수식, 롤업, 버튼, Notion 동기화, 글자 단위 동시 편집은 없습니다. 저장은 REST이고, 멤버 화면에는 `ws/workspace/{workspace_id}/`로 변경 사실만 알립니다. 관계 `config.two_way`가 참이면 반대 속성을 만들고 링크를 같이 갱신합니다. 기존 관계는 한 방향입니다. 조회 `q`는 제목, 속성 텍스트, 블록 본문을 봅니다. 필터 목록은 AND이고, `{op: "and"|"or", filters: [...]}` 그룹은 한 단계 더 중첩할 수 있습니다. `created_at`, `updated_at`, `created_by`, `last_edited_by`는 속성 행 없이 필터와 정렬에 쓸 수 있습니다. 통합대장은 데이터베이스가 아니라 워크스페이스 전체 레코드 조회입니다. 관계 값을 읽을 때는 `{id, title, database_id, database_slug}`이고, 쓸 때는 레코드 id 배열입니다. 레코드 삭제는 `deleted_at`만 찍고 값·블록·관계는 남깁니다. 데이터베이스 삭제는 속한 레코드까지 소프트 삭제하므로 휴지통 목록에 나오지 않습니다.
+수식, 롤업, 버튼, Notion 동기화, 글자 단위 동시 편집은 없습니다. 저장은 REST이고, 멤버 화면에는 `ws/workspace/{workspace_id}/`로 변경 사실만 알립니다. 프론트 계약은 [workspace_realtime_frontend.md](workspace_realtime_frontend.md)입니다. 관계 `config.two_way`가 참이면 반대 속성을 만들고 링크를 같이 갱신합니다. 기존 관계는 한 방향입니다. 조회 `q`는 제목, 속성 텍스트, 블록 본문을 봅니다. 필터 목록은 AND이고, `{op: "and"|"or", filters: [...]}` 그룹은 한 단계 더 중첩할 수 있습니다. `created_at`, `updated_at`, `created_by`, `last_edited_by`는 속성 행 없이 필터와 정렬에 쓸 수 있습니다. 통합대장은 데이터베이스가 아니라 워크스페이스 전체 레코드 조회입니다. 관계 값을 읽을 때는 `{id, title, database_id, database_slug}`이고, 쓸 때는 레코드 id 배열입니다. 레코드 삭제는 `deleted_at`만 찍고 값·블록·관계는 남깁니다. 데이터베이스 삭제는 속한 레코드까지 소프트 삭제하므로 휴지통 목록에 나오지 않습니다.
 
 시드 명령은 두 개입니다. 둘 다 워크스페이스 `koc`를 없으면 만들고, 활성(`status=A`) 사용자를 멤버로 넣습니다. 이미 있는 데이터베이스와 속성은 덮어쓰지 않습니다. 같은 제목의 레코드도 다시 만들지 않습니다.
 

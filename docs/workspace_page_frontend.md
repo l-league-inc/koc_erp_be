@@ -199,13 +199,7 @@ audience: frontend
 
 ## 변경 알림
 
-멤버는 쿠키 JWT로 `ws/workspace/{workspace_id}/`에 연결합니다. 저장이 커밋되면 다음 이벤트만 옵니다.
-
-```json
-{"type":"workspace_changed","workspace_id":1,"entity":"record","action":"updated","id":12,"actor_id":3}
-```
-
-`entity`는 `record`, `block`, `comment`, `database`, `property`, `view`, `page`, `template`입니다. 본문은 없습니다. 이벤트를 받으면 기존 GET으로 다시 조회합니다. 알림 소켓 `ws/notification/{user_id}/`와는 별개입니다.
+연결, 페이로드, 대상별 다시 조회는 [workspace_realtime_frontend.md](workspace_realtime_frontend.md)입니다. 경로는 `ws/workspace/{workspace_id}/`이고, 메시지는 `workspace_changed`만 옵니다.
 
 ## 비범위
 

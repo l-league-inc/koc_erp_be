@@ -5,7 +5,7 @@ audience: frontend
 
 # 워크스페이스 API
 
-KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다. 화면의 데이터베이스는 slug로 구분합니다. 옛 사이드바는 `section_slug`로 묶고, 새 사이드바는 `GET /{workspace_id}/page`의 `parent_id`로 트리를 만듭니다. 인증은 기존 JWT입니다. 기본 페이지의 속성 표는 [koc_pages_frontend.md](koc_pages_frontend.md)입니다. 레코드 본문, 댓글, 활동, 보드·캘린더·갤러리, 템플릿, 휴지통, 페이지 트리, 변경 알림은 [workspace_page_frontend.md](workspace_page_frontend.md)입니다.
+KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다. 화면의 데이터베이스는 slug로 구분합니다. 옛 사이드바는 `section_slug`로 묶고, 새 사이드바는 `GET /{workspace_id}/page`의 `parent_id`로 트리를 만듭니다. 인증은 기존 JWT입니다. 기본 페이지의 속성 표는 [koc_pages_frontend.md](koc_pages_frontend.md)입니다. 레코드 본문, 댓글, 활동, 보드·캘린더·갤러리, 템플릿, 휴지통, 페이지 트리는 [workspace_page_frontend.md](workspace_page_frontend.md)입니다. WebSocket 변경 알림은 [workspace_realtime_frontend.md](workspace_realtime_frontend.md)입니다.
 
 ## 유저 플로우
 

@@ -265,6 +265,7 @@ FRONTEND_PASSWORD_RESET_SUCCESS_URL = f"{FRONTEND_URL}/auth/verifyEmailpw"
 # OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = "gpt-4o-mini"
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 # Sentry
 sentry_sdk.init(

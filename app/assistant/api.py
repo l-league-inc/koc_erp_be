@@ -2,6 +2,7 @@ from asgiref.sync import sync_to_async
 from ninja import Query, Router
 
 from api.security import jwt_auth
+from assistant import llm
 from assistant.agent import (
     confirm_actions,
     create_session,
@@ -15,6 +16,8 @@ from assistant.schemas import (
     ConfirmSchema,
     MessageCreateSchema,
     MessageResultSchema,
+    ModelListSchema,
+    ModelSelectSchema,
     SessionCreateSchema,
     SessionDetailSchema,
     SessionListItemSchema,
@@ -45,6 +48,28 @@ from assistant.workbot import (
 
 agent_router = Router(tags=["Agent"])
 workbot_router = Router(tags=["Workbot"])
+
+
+@agent_router.get(
+    "/model",
+    summary="[C] 언어 모델 목록 조회",
+    description="업무 대화와 워크봇 초안에서 고를 수 있는 모델과 현재 선택을 조회합니다.",
+    response=ModelListSchema,
+    auth=jwt_auth,
+)
+async def list_model_api(request):
+    return await sync_to_async(llm.list_models)(request.auth)
+
+
+@agent_router.put(
+    "/model",
+    summary="[C] 언어 모델 선택",
+    description="업무 대화와 워크봇 초안에 쓸 모델을 저장합니다.",
+    response=ModelListSchema,
+    auth=jwt_auth,
+)
+async def select_model_api(request, payload: ModelSelectSchema):
+    return await sync_to_async(llm.save_model)(request.auth, payload.model)
 
 
 def _dump(payload, *, exclude_unset: bool = False) -> dict:
@@ -109,7 +134,12 @@ async def delete_session_api(request, session_id: int):
     auth=jwt_auth,
 )
 async def send_message_api(request, session_id: int, payload: MessageCreateSchema):
-    return await sync_to_async(send_message)(request.auth, session_id, payload.content)
+    return await sync_to_async(send_message)(
+        request.auth,
+        session_id,
+        payload.content,
+        payload.model,
+    )
 
 
 @agent_router.post(
@@ -230,6 +260,7 @@ async def draft_workbot_api(request, payload: WorkbotDraftSchema):
         request.auth,
         payload.workspace_id,
         payload.instruction,
+        payload.model,
     )
 
 

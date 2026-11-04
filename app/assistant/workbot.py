@@ -237,13 +237,14 @@ def _schema_catalog(databases) -> str:
     return "\n".join(lines) if lines else "- 없음"
 
 
-def draft_workbot(user, workspace_id: int, instruction: str) -> dict[str, Any]:
+def draft_workbot(user, workspace_id: int, instruction: str, model: str = "") -> dict[str, Any]:
     text = (instruction or "").strip()
     if not text:
         raise HttpError(400, "지시가 필요합니다.")
     get_membership(user, workspace_id)
     databases = accessible_databases(user).filter(workspace_id=workspace_id)
     catalog = _schema_catalog(databases)
+    chosen = llm.use_model(user, model)
     parsed = llm.complete_json(
         [
             {
@@ -273,7 +274,8 @@ def draft_workbot(user, workspace_id: int, instruction: str) -> dict[str, Any]:
                 ),
             },
             {"role": "user", "content": text},
-        ]
+        ],
+        model=chosen,
     )
     normalized = _normalize_draft(user, workspace_id, parsed)
     normalized["instruction"] = text

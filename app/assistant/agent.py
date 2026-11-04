@@ -484,7 +484,7 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
     raise HttpError(400, "지원하지 않는 도구입니다.")
 
 
-def send_message(user, session_id: int, content: str) -> dict[str, Any]:
+def send_message(user, session_id: int, content: str, model: str = "") -> dict[str, Any]:
     text = (content or "").strip()
     if not text:
         raise HttpError(400, "내용이 필요합니다.")
@@ -498,18 +498,20 @@ def send_message(user, session_id: int, content: str) -> dict[str, Any]:
     ]
     created: list[int] = []
     answer = ""
+    chosen = llm.use_model(user, model)
     for _round in range(_MAX_ROUNDS):
-        result = llm.complete(messages, _TOOLS)
+        result = llm.complete(messages, _TOOLS, model=chosen)
         if not result["tool_calls"]:
             answer = result["content"].strip() or "요청을 확인했습니다."
             break
-        messages.append(
-            {
-                "role": "assistant",
-                "content": result["content"],
-                "tool_calls": result["tool_calls"],
-            }
-        )
+        turn = {
+            "role": "assistant",
+            "content": result["content"],
+            "tool_calls": result["tool_calls"],
+        }
+        if result.get("replay"):
+            turn["replay"] = result["replay"]
+        messages.append(turn)
         for call in result["tool_calls"]:
             try:
                 output = _dispatch(session, user, call["name"], call["arguments"], created)

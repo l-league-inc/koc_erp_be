@@ -23,6 +23,23 @@ class SessionListItemSchema(SessionResponseSchema):
 
 class MessageCreateSchema(Schema):
     content: str
+    model: str = ""
+
+
+class ModelOptionSchema(Schema):
+    id: str
+    provider: str
+    name: str
+    description: str
+
+
+class ModelListSchema(Schema):
+    selected: str
+    models: list[ModelOptionSchema]
+
+
+class ModelSelectSchema(Schema):
+    model: str
 
 
 class MessageResponseSchema(Schema):
@@ -142,6 +159,7 @@ class WorkbotResponseSchema(Schema):
 class WorkbotDraftSchema(Schema):
     workspace_id: int
     instruction: str
+    model: str = ""
 
 
 class WorkbotDraftResponseSchema(Schema):

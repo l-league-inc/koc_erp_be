@@ -17,7 +17,7 @@ from workspace.seed import seed_koc_workspace
 User = get_user_model()
 
 
-def _fake_complete(messages, tools):
+def _fake_complete(messages, tools, model=None):
     if any(item.get("role") == "tool" for item in messages):
         return {"content": "출근 초안을 만들었습니다.", "tool_calls": []}
     return {
@@ -154,7 +154,7 @@ class AgentApiTests(TestCase):
         )
         session_id = created.json()["id"]
 
-        def _fake_attendance(messages, tools):
+        def _fake_attendance(messages, tools, model=None):
             tool_messages = [item for item in messages if item.get("role") == "tool"]
             if not tool_messages:
                 self.assertIn("attendance", messages[0]["content"])
@@ -261,7 +261,7 @@ class AgentApiTests(TestCase):
         )
         session_id = created.json()["id"]
 
-        def _fake_skill(messages, tools):
+        def _fake_skill(messages, tools, model=None):
             if any(item.get("role") == "tool" for item in messages):
                 return {"content": "스킬 초안을 만들었습니다.", "tool_calls": []}
             return {
@@ -362,6 +362,61 @@ class AgentApiTests(TestCase):
             headers=self.headers(self.outsider),
         )
         self.assertEqual(created.status_code, 403)
+
+    async def test_user_selects_model_for_the_next_message(self):
+        listed = await self.client.get("/model", headers=self.headers())
+        self.assertEqual(listed.status_code, 200, listed.json())
+        self.assertEqual(listed.json()["selected"], "gpt-6-luna")
+        self.assertEqual(len(listed.json()["models"]), 6)
+        self.assertEqual(
+            {item["provider"] for item in listed.json()["models"]},
+            {"openai", "anthropic"},
+        )
+
+        saved = await self.client.put(
+            "/model",
+            json={"model": "claude-sonnet-5-5"},
+            headers=self.headers(),
+        )
+        self.assertEqual(saved.status_code, 200, saved.json())
+        self.assertEqual(saved.json()["selected"], "claude-sonnet-5-5")
+
+        rejected = await self.client.put(
+            "/model",
+            json={"model": "gpt-4o-mini"},
+            headers=self.headers(),
+        )
+        self.assertEqual(rejected.status_code, 400)
+
+        workspace_id = await self._workspace_id()
+        session = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id},
+            headers=self.headers(),
+        )
+        seen = {}
+
+        def _fake_model(messages, tools, model=None):
+            seen["model"] = model
+            return {"content": "확인했습니다.", "tool_calls": []}
+
+        with patch("assistant.agent.llm.complete", _fake_model):
+            message = await self.client.post(
+                f"/session/{session.json()['id']}/message",
+                json={"content": "오늘 일정 알려줘"},
+                headers=self.headers(),
+            )
+        self.assertEqual(message.status_code, 200, message.json())
+        self.assertEqual(seen["model"], "claude-sonnet-5-5")
+
+        with patch("assistant.agent.llm.complete", _fake_model):
+            overridden = await self.client.post(
+                f"/session/{session.json()['id']}/message",
+                json={"content": "다시 알려줘", "model": "gpt-6.1-sol"},
+                headers=self.headers(),
+            )
+        self.assertEqual(overridden.status_code, 200, overridden.json())
+        self.assertEqual(seen["model"], "gpt-6.1-sol")
 
     async def test_delete_session_hides_it_from_list_and_detail(self):
         workspace_id = await self._workspace_id()

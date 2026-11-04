@@ -163,7 +163,8 @@ class WorkbotApiTests(TestCase):
     async def test_draft_does_not_save(self):
         workspace_id = await self._workspace_id()
 
-        def fake_json(messages):
+        def fake_json(messages, model=None):
+            self.assertEqual(model, "claude-haiku-5-5")
             system = messages[0]["content"]
             self.assertIn("한국어로만 작성합니다", system)
             self.assertIn("hr (", system)
@@ -180,7 +181,11 @@ class WorkbotApiTests(TestCase):
         with patch("assistant.workbot.llm.complete_json", fake_json):
             drafted = await self.client.post(
                 "/draft",
-                json={"workspace_id": workspace_id, "instruction": "매주 금요일 미작성 업무를 알려줘"},
+                json={
+                    "workspace_id": workspace_id,
+                    "instruction": "매주 금요일 미작성 업무를 알려줘",
+                    "model": "claude-haiku-5-5",
+                },
                 headers=self.headers(),
             )
         self.assertEqual(drafted.status_code, 200, drafted.json())

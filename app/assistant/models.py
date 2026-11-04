@@ -117,6 +117,22 @@ class Skill(CommonModel):
         return self.name
 
 
+class ModelPreference(models.Model):
+    """사용자가 고른 업무 대화·워크봇 언어 모델입니다."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="llm_preference",
+        help_text="사용자",
+    )
+    model = models.CharField(max_length=64, help_text="모델 id")
+    updated_at = models.DateTimeField(auto_now=True, help_text="수정일")
+
+    def __str__(self) -> str:
+        return f"{self.user_id}:{self.model}"
+
+
 class Workbot(CommonModel):
     """저장된 지시로 반복 실행하는 워크봇입니다."""
 

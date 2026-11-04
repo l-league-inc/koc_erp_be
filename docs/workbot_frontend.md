@@ -12,7 +12,7 @@ audience: frontend
 1. `GET /api/v1/workbot`으로 내 워크봇을 그립니다. `enabled`가 켜진 봇만 일정에 실행됩니다.
 2. `GET /api/v1/workbot/stats`로 활성 수, 이번 달 실행, 성공률, 절약 시간을 채웁니다.
 3. `GET /api/v1/workbot/run`으로 최근 실행을 그립니다. `success`는 반영된 실행, `waiting`은 확인 대기, `failed`는 실패입니다.
-4. 새 봇은 `POST /api/v1/workbot/draft`에 문장을 보내 초안을 받은 뒤, 사용자가 저장할 때 `POST /api/v1/workbot`으로 만듭니다. 초안의 이름, 설명, 알림 문구, 레코드 제목과 값은 요청 문장을 따른 한국어입니다. 날짜 기간은 `period`처럼 스키마에 있는 date 속성에 `{start, end}`로 들어옵니다.
+4. 새 봇은 `POST /api/v1/workbot/draft`에 문장을 보내 초안을 받은 뒤, 사용자가 저장할 때 `POST /api/v1/workbot`으로 만듭니다. 초안의 이름, 설명, 알림 문구, 레코드 제목과 값은 요청 문장을 따른 한국어입니다. 날짜 기간은 `period`처럼 스키마에 있는 date 속성에 `{start, end}`로 들어옵니다. 초안 모델은 `GET /api/v1/agent/model`의 선택과 같고, 이번 초안만 바꾸려면 `model`을 함께 보냅니다.
 5. 스위치는 `PATCH /api/v1/workbot/{workbot_id}`의 `enabled`입니다.
 6. `waiting` 실행은 `POST /api/v1/workbot/run/{run_id}/confirm`으로 반영합니다.
 
@@ -47,7 +47,7 @@ audience: frontend
 - `POST /{workbot_id}/run` 지금 실행
 - `POST /run/{run_id}/confirm` 확인 대기 반영
 
-봇 항목은 `id`, `workspace_id`, `owner_id`, `name`, `description`, `instruction`, `spec`, `schedule`, `enabled`, `database_slug`, `estimated_minutes`, `next_run_at`, `last_run_at`, `created_at`, `updated_at`입니다. 생성 본문도 같은 필드에서 `id`와 실행 시각을 뺍니다. `workspace_id`와 `database_slug`는 생성에 필요합니다. 초안 응답은 `name`, `description`, `instruction`, `database_slug`, `schedule`, `estimated_minutes`, `spec`이고 저장되지 않습니다.
+봇 항목은 `id`, `workspace_id`, `owner_id`, `name`, `description`, `instruction`, `spec`, `schedule`, `enabled`, `database_slug`, `estimated_minutes`, `next_run_at`, `last_run_at`, `created_at`, `updated_at`입니다. 생성 본문도 같은 필드에서 `id`와 실행 시각을 뺍니다. `workspace_id`와 `database_slug`는 생성에 필요합니다. 초안 요청은 `workspace_id`, `instruction`, `model`입니다. `model`을 비우면 `GET /api/v1/agent/model`에 저장된 선택을 쓰고, 값을 넣으면 그 초안에 쓰며 선택도 바꿉니다. 초안 응답은 `name`, `description`, `instruction`, `database_slug`, `schedule`, `estimated_minutes`, `spec`이고 저장되지 않습니다.
 
 실행 항목은 `id`, `workbot_id`, `status`(`success`/`waiting`/`failed`), `summary`, `record_ids`, `payload`, `created_at`입니다. 통계는 `active_count`, `month_run_count`, `success_rate`, `saved_minutes`입니다.
 

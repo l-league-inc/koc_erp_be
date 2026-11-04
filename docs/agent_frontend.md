@@ -7,22 +7,25 @@ audience: frontend
 
 홈 입력창과 출근, 일정, 견적, 출장, A/S 단축은 같은 API를 씁니다. 단축도 같은 대화로 들어가고, 서버가 고정 스킬을 골라 처리합니다. 인증은 기존 JWT입니다.
 
-모델 호출은 서버가 합니다. 프롬프트에는 스킬 이름과 설명만 들어가고, 맞는 스킬의 절차는 그때 읽습니다. 레코드와 스킬의 생성·수정은 초안으로 돌아오고, 사용자가 확정한 뒤에만 저장됩니다.
+모델 호출은 서버가 합니다. 사용자는 OpenAI 3개와 Anthropic 3개 중에서 고르고, 그 선택은 업무 대화와 워크봇 초안에 함께 쓰입니다. 프롬프트에는 스킬 이름과 설명만 들어가고, 맞는 스킬의 절차는 그때 읽습니다. 레코드와 스킬의 생성·수정은 초안으로 돌아오고, 사용자가 확정한 뒤에만 저장됩니다.
 
 고정 스킬이 만드는 레코드 초안의 `database_slug`는 출근 `attendance`, 일정 `tasks`, 견적 `quotes`, 출장 `trip`, A/S `after_service`입니다. 임직원·거래처 칸은 그 레코드 id 배열입니다. 대화 `database_slug`가 한 영역이면 조회는 그 영역의 관계 대상까지 되고, 생성 초안은 그 영역만 됩니다.
 
 ## 유저 플로우
 
-1. 화면을 다시 열면 `GET /api/v1/agent/session`으로 최근 대화를 가져옵니다. `preview`는 마지막 메시지입니다.
-2. 대화를 누르면 `GET /api/v1/agent/session/{session_id}`의 `messages`를 시간순으로 그립니다. `proposed_actions` 중 `pending`만 확정 버튼에 연결합니다.
-3. 새 대화는 `POST /api/v1/agent/session`에 `workspace_id`를 보냅니다. 한 영역만 다루면 `database_slug`를 넣습니다. 비우면 전체입니다. 대화를 지우면 `DELETE /api/v1/agent/session/{session_id}`입니다.
-4. `POST /api/v1/agent/session/{session_id}/message`에 사용자 문장을 보냅니다.
-5. 응답 `proposed_actions`가 비어 있으면 안내 문장만 보여 줍니다.
-6. 초안이 있으면 내용을 보여주고, 확인 후 `POST /api/v1/agent/session/{session_id}/confirm`에 `action_ids`를 보냅니다.
-7. 확정 응답의 `records`로 만들어진 행을 엽니다. 스킬 초안이면 `skills`의 `name`으로 스킬 목록을 다시 불러옵니다.
+1. 화면을 다시 열면 `GET /api/v1/agent/model`로 모델 목록과 `selected`를 그립니다. 바꾸면 `PUT /api/v1/agent/model`에 `model`을 보냅니다.
+2. `GET /api/v1/agent/session`으로 최근 대화를 가져옵니다. `preview`는 마지막 메시지입니다.
+3. 대화를 누르면 `GET /api/v1/agent/session/{session_id}`의 `messages`를 시간순으로 그립니다. `proposed_actions` 중 `pending`만 확정 버튼에 연결합니다.
+4. 새 대화는 `POST /api/v1/agent/session`에 `workspace_id`를 보냅니다. 한 영역만 다루면 `database_slug`를 넣습니다. 비우면 전체입니다. 대화를 지우면 `DELETE /api/v1/agent/session/{session_id}`입니다.
+5. `POST /api/v1/agent/session/{session_id}/message`에 사용자 문장을 보냅니다. 이번 문장만 다른 모델을 쓰려면 `model`을 함께 보냅니다. 비우면 저장된 선택을 씁니다.
+6. 응답 `proposed_actions`가 비어 있으면 안내 문장만 보여 줍니다.
+7. 초안이 있으면 내용을 보여주고, 확인 후 `POST /api/v1/agent/session/{session_id}/confirm`에 `action_ids`를 보냅니다.
+8. 확정 응답의 `records`로 만들어진 행을 엽니다. 스킬 초안이면 `skills`의 `name`으로 스킬 목록을 다시 불러옵니다.
 
 ## API
 
+- `GET /model` 선택 가능한 모델과 현재 `selected`. 항목은 `id`, `provider`(`openai`/`anthropic`), `name`, `description`
+- `PUT /model` `{model}` 저장. 응답은 목록과 같습니다. 없는 id는 400
 - `GET /session` 내 최근 대화 50개. `workspace_id` 쿼리면 그 공간만. 항목은 `preview`, `updated_at`
 - `GET /session/{session_id}` 메시지와 초안 전체. 메시지는 오래된 순
 - `POST /session` 대화 시작. 201
@@ -37,8 +40,19 @@ audience: frontend
 메시지 본문:
 
 ```json
-{"content": "오늘 출근 등록해줘"}
+{"content": "오늘 출근 등록해줘", "model": "claude-sonnet-5-5"}
 ```
+
+`model`을 비우면 저장된 선택을 씁니다. 값을 넣으면 그 문장에 쓰고 선택도 바꿉니다. 기본값은 `gpt-6-luna`입니다.
+
+| id | provider | 이름 |
+|----|----------|------|
+| `gpt-6-luna` | openai | GPT-6 Luna |
+| `gpt-6.1-terra` | openai | GPT-6.1 Terra |
+| `gpt-6.1-sol` | openai | GPT-6.1 Sol |
+| `claude-haiku-5-5` | anthropic | Claude Haiku 5.5 |
+| `claude-sonnet-5-5` | anthropic | Claude Sonnet 5.5 |
+| `claude-opus-5-5` | anthropic | Claude Opus 5.5 |
 
 확정 본문:
 
@@ -58,6 +72,7 @@ audience: frontend
 
 ## 구현 체크리스트
 
+- 모델 선택은 `GET /model`의 `selected`를 보여주고, 바꾸면 `PUT /model`을 호출한다.
 - 보내기 전에 문장이 비었는지 확인한다.
 - 응답 문구는 초안일 수 있다는 안내와 함께 보여 준다.
 - 같은 `session_id`로 이어서 보내고, 재진입 때는 상세 조회로 메시지를 복원한다.

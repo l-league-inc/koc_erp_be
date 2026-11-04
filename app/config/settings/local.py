@@ -140,6 +140,7 @@ REDIS_DB = 0
 # OpenAI
 OPENAI_API_KEY = get_secret("OPENAI_API_KEY")
 OPENAI_MODEL = "gpt-4o-mini"
+ANTHROPIC_API_KEY = secrets.get("ANTHROPIC_API_KEY", "")
 
 # CloudFront
 CLOUDFRONT_URL = "https://d2559sqcuyrr6z.cloudfront.net"

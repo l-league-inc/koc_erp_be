@@ -732,7 +732,45 @@ def _coerce(prop: Property, raw: Any, record: Record) -> dict[str, Any]:
     raise HttpError(400, "지원하지 않는 속성 타입입니다.")
 
 
+def fold_date_range_aliases(database: Database, values: dict[str, Any]) -> dict[str, Any]:
+    """출장 `period`에 잘못 붙은 start_date, end_date를 기간 값으로 합칩니다."""
+    props = {prop.slug: prop for prop in database.properties.all()}
+    period = props.get("period")
+    if period is None or period.type != Property.Type.DATE:
+        return values
+    if "start_date" in props or "end_date" in props:
+        return values
+    if "start_date" not in values and "end_date" not in values:
+        return values
+    folded = dict(values)
+    start_alias = _present_date(folded.pop("start_date", None))
+    end_alias = _present_date(folded.pop("end_date", None))
+    current = folded.get("period")
+    if isinstance(current, dict):
+        start = _present_date(current.get("start")) or start_alias or end_alias
+        end = _present_date(current.get("end")) or end_alias or start
+    elif _present_date(current):
+        start = current
+        end = end_alias or start_alias or current
+    else:
+        start = start_alias or end_alias
+        end = end_alias or start
+    if start:
+        payload: dict[str, Any] = {"start": start}
+        if end:
+            payload["end"] = end
+        folded["period"] = payload
+    return folded
+
+
+def _present_date(raw: Any) -> Any:
+    if raw is None or raw == "" or raw == []:
+        return None
+    return raw
+
+
 def apply_values(record: Record, values: dict[str, Any]) -> None:
+    values = fold_date_range_aliases(record.database, values)
     props = {prop.slug: prop for prop in record.database.properties.all()}
     for slug, raw in values.items():
         prop = props.get(slug)

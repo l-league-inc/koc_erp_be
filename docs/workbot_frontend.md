@@ -12,7 +12,7 @@ audience: frontend
 1. `GET /api/v1/workbot`으로 내 워크봇을 그립니다. `enabled`가 켜진 봇만 일정에 실행됩니다.
 2. `GET /api/v1/workbot/stats`로 활성 수, 이번 달 실행, 성공률, 절약 시간을 채웁니다.
 3. `GET /api/v1/workbot/run`으로 최근 실행을 그립니다. `success`는 반영된 실행, `waiting`은 확인 대기, `failed`는 실패입니다.
-4. 새 봇은 `POST /api/v1/workbot/draft`에 문장을 보내 초안을 받은 뒤, 사용자가 저장할 때 `POST /api/v1/workbot`으로 만듭니다.
+4. 새 봇은 `POST /api/v1/workbot/draft`에 문장을 보내 초안을 받은 뒤, 사용자가 저장할 때 `POST /api/v1/workbot`으로 만듭니다. 초안의 이름, 설명, 알림 문구, 레코드 제목과 값은 요청 문장을 따른 한국어입니다. 날짜 기간은 `period`처럼 스키마에 있는 date 속성에 `{start, end}`로 들어옵니다.
 5. 스위치는 `PATCH /api/v1/workbot/{workbot_id}`의 `enabled`입니다.
 6. `waiting` 실행은 `POST /api/v1/workbot/run/{run_id}/confirm`으로 반영합니다.
 

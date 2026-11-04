@@ -5,6 +5,7 @@ from api.security import jwt_auth
 from assistant.agent import (
     confirm_actions,
     create_session,
+    delete_session,
     get_session_detail,
     list_sessions,
     send_message,
@@ -86,6 +87,18 @@ async def list_session_api(request, workspace_id: int | None = Query(None)):
 )
 async def get_session_api(request, session_id: int):
     return await sync_to_async(get_session_detail)(request.auth, session_id)
+
+
+@agent_router.delete(
+    "/session/{session_id}",
+    summary="[C] 업무 대화 삭제",
+    description="호출자의 대화를 소프트 삭제합니다. 목록과 상세 조회에서 빠집니다.",
+    response={204: None},
+    auth=jwt_auth,
+)
+async def delete_session_api(request, session_id: int):
+    await sync_to_async(delete_session)(request.auth, session_id)
+    return 204, None
 
 
 @agent_router.post(

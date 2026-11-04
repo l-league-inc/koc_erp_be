@@ -167,6 +167,8 @@ CSV에 값이 없어 시드가 미리 넣는 옵션:
 {"period": {"start": "2026-10-27", "end": "2026-10-28"}}
 ```
 
+`start_date`와 `end_date`를 같이 보내면 서버가 `period`로 합칩니다. 휴가 `leave`의 `start_date`, `end_date`는 별도 칸이라 그대로 둡니다.
+
 ### 일일 업무 `tasks`
 
 | slug | 이름 | 타입 |

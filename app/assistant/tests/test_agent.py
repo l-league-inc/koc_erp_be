@@ -362,3 +362,57 @@ class AgentApiTests(TestCase):
             headers=self.headers(self.outsider),
         )
         self.assertEqual(created.status_code, 403)
+
+    async def test_delete_session_hides_it_from_list_and_detail(self):
+        workspace_id = await self._workspace_id()
+        created = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id},
+            headers=self.headers(),
+        )
+        session_id = created.json()["id"]
+        deleted = await self.client.delete(
+            f"/session/{session_id}",
+            headers=self.headers(),
+        )
+        self.assertEqual(deleted.status_code, 204)
+        listed = await self.client.get("/session", headers=self.headers())
+        self.assertNotIn(session_id, [item["id"] for item in listed.json()])
+        detail = await self.client.get(
+            f"/session/{session_id}",
+            headers=self.headers(),
+        )
+        self.assertEqual(detail.status_code, 404)
+        missing = await self.client.delete("/session/999999", headers=self.headers())
+        self.assertEqual(missing.status_code, 404)
+
+    async def test_trip_proposal_folds_end_date_into_period(self):
+        workspace_id = await self._workspace_id()
+        trip = await sync_to_async(self._ensure_database)(workspace_id, "trip", "출장")
+        await sync_to_async(Property.objects.create)(
+            database=trip,
+            name="출장기간",
+            slug="period",
+            type=Property.Type.DATE,
+        )
+        session = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id, "database_slug": "trip"},
+            headers=self.headers(),
+        )
+        stored = await sync_to_async(AgentSession.objects.get)(id=session.json()["id"])
+        action = await sync_to_async(_dispatch)(
+            stored,
+            self.user,
+            "propose_create_record",
+            {
+                "database_slug": "trip",
+                "title": "부산",
+                "values": {"start_date": "2026-11-04", "end_date": "2026-11-06"},
+            },
+            [],
+        )
+        period = action["payload"]["values"]["period"]
+        self.assertEqual(period["start"], "2026-11-04")
+        self.assertEqual(period["end"], "2026-11-06")
+        self.assertNotIn("end_date", action["payload"]["values"])

@@ -164,6 +164,10 @@ class WorkbotApiTests(TestCase):
         workspace_id = await self._workspace_id()
 
         def fake_json(messages):
+            system = messages[0]["content"]
+            self.assertIn("한국어로만 작성합니다", system)
+            self.assertIn("hr (", system)
+            self.assertIn("status:", system)
             return {
                 "name": "근태 마감 알림봇",
                 "description": "미입력 알림",

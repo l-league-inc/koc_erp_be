@@ -10,10 +10,11 @@ from assistant import llm
 from assistant.models import Workbot, WorkbotRun
 from assistant.schedule import next_run_at, parse_cron
 from notification.models import Notification
-from workspace.models import RecordActivity, WorkspaceMember
+from workspace.models import Property, RecordActivity, WorkspaceMember
 from workspace.utils import (
     accessible_databases,
     create_record,
+    fold_date_range_aliases,
     get_membership,
     query_records,
 )
@@ -51,6 +52,20 @@ def validate_spec(spec: Any) -> dict[str, Any]:
         "requires_confirmation": bool(spec.get("requires_confirmation")),
         "record": record,
     }
+
+
+def _fold_spec_record(user, workspace_id: int, slug: str, spec: dict[str, Any]) -> dict[str, Any]:
+    record = spec.get("record")
+    if not isinstance(record, dict) or not isinstance(record.get("values"), dict):
+        return spec
+    folded = dict(spec)
+    record = dict(record)
+    record["values"] = fold_date_range_aliases(
+        _database(user, workspace_id, slug),
+        record["values"],
+    )
+    folded["record"] = record
+    return folded
 
 
 def _minutes(value: Any) -> int:
@@ -145,7 +160,12 @@ def create_workbot(user, data: dict[str, Any]) -> dict[str, Any]:
         name=name,
         description=str(data.get("description") or ""),
         instruction=str(data.get("instruction") or ""),
-        spec=validate_spec(data.get("spec")),
+        spec=_fold_spec_record(
+            user,
+            data["workspace_id"],
+            slug,
+            validate_spec(data.get("spec")),
+        ),
         schedule=schedule,
         enabled=enabled,
         database_slug=slug,
@@ -174,7 +194,12 @@ def update_workbot(user, workbot_id: int, data: dict[str, Any]) -> dict[str, Any
     if data.get("instruction") is not None:
         bot.instruction = str(data["instruction"])
     if data.get("spec") is not None:
-        bot.spec = validate_spec(data["spec"])
+        bot.spec = _fold_spec_record(
+            user,
+            bot.workspace_id,
+            str(data.get("database_slug") or bot.database_slug).strip() or bot.database_slug,
+            validate_spec(data["spec"]),
+        )
     if data.get("schedule") is not None:
         bot.schedule = " ".join(str(data["schedule"]).split())
         parse_cron(bot.schedule)
@@ -199,26 +224,52 @@ def delete_workbot(user, workbot_id: int) -> None:
     bot.delete()
 
 
+def _schema_catalog(databases) -> str:
+    lines = []
+    for database in databases.prefetch_related("properties").order_by("slug"):
+        fields = [
+            f"{prop.slug}:{prop.name}:{prop.type}"
+            for prop in database.properties.all()
+            if prop.type != Property.Type.TITLE
+        ]
+        joined = ", ".join(fields) if fields else "없음"
+        lines.append(f"- {database.slug} ({database.name}) {joined}")
+    return "\n".join(lines) if lines else "- 없음"
+
+
 def draft_workbot(user, workspace_id: int, instruction: str) -> dict[str, Any]:
     text = (instruction or "").strip()
     if not text:
         raise HttpError(400, "지시가 필요합니다.")
     get_membership(user, workspace_id)
     databases = accessible_databases(user).filter(workspace_id=workspace_id)
-    catalog = ", ".join(databases.values_list("slug", flat=True))
+    catalog = _schema_catalog(databases)
     parsed = llm.complete_json(
         [
             {
                 "role": "system",
                 "content": (
-                    "워크봇 초안을 JSON으로만 답합니다. 키는 name, description, database_slug, "
-                    "schedule, estimated_minutes, spec입니다. schedule은 분 시 일 월 요일 크론입니다. "
-                    "spec.action은 notify 또는 create_record입니다. "
-                    "spec.filters는 워크스페이스 조회 필터 배열입니다. "
-                    "spec.notify_user_ids는 정수 배열이고 spec.message는 알림 문구입니다. "
-                    "spec.requires_confirmation은 boolean입니다. "
-                    "create_record이면 spec.record.title이 필요합니다. "
-                    f"사용할 수 있는 database_slug는 {catalog}입니다."
+                    "당신은 KOC 워크봇 설계자입니다. JSON으로만 답합니다. "
+                    "사용자가 요청한 대상, 조건, 주기, 만들 내용만 반영하고 요청하지 않은 동작이나 필드를 넣지 않습니다. "
+                    "name, description, spec.message, spec.record.title과 사람이 읽는 값은 한국어로만 작성합니다. "
+                    "영어 문장을 만들지 않습니다. "
+                    "키는 name, description, database_slug, schedule, estimated_minutes, spec입니다. "
+                    "name은 요청을 한 줄로 요약한 한국어 이름이고 description은 요청을 한국어로 짧게 옮긴 설명입니다. "
+                    "database_slug는 아래 목록에서 요청과 가장 가까운 영역 하나입니다. "
+                    "schedule은 분 시 일 월 요일 크론입니다. "
+                    "매일 9시는 0 9 * * *, 매주 월요일 10시는 0 10 * * 1, 평일 9시는 0 9 * * 1-5입니다. "
+                    "시각을 말하지 않았으면 0 9 * * 1-5입니다. "
+                    "estimated_minutes는 요청에 있으면 그 분이고 없으면 10입니다. "
+                    "spec.action은 알림이면 notify, 레코드를 만들면 create_record입니다. "
+                    "spec.filters는 그 영역 속성 slug만 쓰는 조회 필터 배열입니다. 조건이 없으면 빈 배열입니다. "
+                    "spec.notify_user_ids는 정수 배열입니다. 특정 사용자를 말하지 않았으면 빈 배열입니다. "
+                    "spec.message는 알림일 때 사용자에게 보여줄 한국어 문구입니다. "
+                    "spec.requires_confirmation은 확인 후 실행을 요청했을 때만 true입니다. "
+                    "create_record이면 spec.record.title은 한국어 제목이고 spec.record.values의 키는 그 영역 속성 slug만 씁니다. "
+                    "날짜 기간은 start_date나 end_date가 아니라 date 속성 하나에 "
+                    "{\"start\":\"YYYY-MM-DD\",\"end\":\"YYYY-MM-DD\"}로 넣습니다. "
+                    "아래는 영역과 속성입니다.\n"
+                    f"{catalog}"
                 ),
             },
             {"role": "user", "content": text},
@@ -242,7 +293,12 @@ def _normalize_draft(user, workspace_id: int, payload: dict[str, Any]) -> dict[s
         "database_slug": slug,
         "schedule": schedule,
         "estimated_minutes": minutes,
-        "spec": validate_spec(payload.get("spec") or {}),
+        "spec": _fold_spec_record(
+            user,
+            workspace_id,
+            slug,
+            validate_spec(payload.get("spec") or {}),
+        ),
     }
 
 

@@ -73,6 +73,39 @@ class KocPageSeedTests(TestCase):
         self.assertTrue(export_values(task)["done"])
         self.assertEqual(export_values(Record.objects.get(title="인버터"))["quantity"], "28")
 
+    async def test_trip_registration_accepts_end_date_as_period(self):
+        trip = await sync_to_async(Database.objects.get)(slug="trip")
+        created = await self.client.post(
+            f"/database/{trip.id}/record",
+            json={
+                "title": "부산 출장",
+                "values": {
+                    "destination": "부산",
+                    "start_date": "2026-11-04",
+                    "end_date": "2026-11-06",
+                },
+            },
+            headers=self.headers(),
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        period = created.json()["values"]["period"]
+        self.assertTrue(period["start"].startswith("2026-11-04"))
+        self.assertTrue(period["end"].startswith("2026-11-06"))
+        self.assertNotIn("end_date", created.json()["values"])
+
+        leave = await sync_to_async(Database.objects.get)(slug="leave")
+        left = await self.client.post(
+            f"/database/{leave.id}/record",
+            json={
+                "title": "연차",
+                "values": {"start_date": "2026-11-04", "end_date": "2026-11-06"},
+            },
+            headers=self.headers(),
+        )
+        self.assertEqual(left.status_code, 201, left.content)
+        self.assertTrue(left.json()["values"]["end_date"].startswith("2026-11-06"))
+        self.assertNotIn("period", left.json()["values"])
+
     async def test_section_is_in_database_response(self):
         listed = await self.client.get("/database", headers=self.headers())
         self.assertEqual(listed.status_code, 200, listed.content)

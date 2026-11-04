@@ -15,6 +15,7 @@ from document.utils import get_file_detail, search_files
 from workspace.utils import (
     accessible_databases,
     create_record,
+    fold_date_range_aliases,
     get_membership,
     get_record,
     list_members,
@@ -331,6 +332,20 @@ def create_session(user, workspace_id: int, database_slug: str) -> dict[str, Any
     return serialize_session(session)
 
 
+def delete_session(user, session_id: int) -> None:
+    session = _session(user, session_id)
+    session.delete()
+
+
+def _prepare_values(database, values: dict[str, Any]) -> dict[str, Any]:
+    folded = fold_date_range_aliases(database, values)
+    known = set(database.properties.values_list("slug", flat=True))
+    unknown = [slug for slug in folded if slug not in known]
+    if unknown:
+        raise HttpError(400, f"속성 {unknown[0]}을 찾을 수 없습니다.")
+    return folded
+
+
 def _history(session: AgentSession) -> list[dict[str, str]]:
     messages = list(session.messages.order_by("-id")[:20])
     messages.reverse()
@@ -344,17 +359,21 @@ def _system_prompt(session: AgentSession, user) -> str:
     catalog = "\n".join(lines) if lines else "- 없음"
     return (
         "당신은 KOC 워크스페이스 업무 도우미입니다. "
+        "사용자에게 보이는 문장은 한국어로만 작성합니다. "
         f"워크스페이스 id는 {session.workspace_id}이고 범위는 {scope}입니다. "
         f"오늘 날짜는 {timezone.now().date().isoformat()}이고 "
         f"사용자 id는 {user.id}이며 이메일은 {user.email}입니다. "
         "멤버, 스키마, 레코드는 도구로 조회합니다. "
+        "values의 키는 get_database_schema에 있는 slug만 사용합니다. "
+        "날짜 범위는 그 date 속성에 {\"start\",\"end\"}로 넣습니다. "
+        "스키마에 없는 start_date나 end_date는 넣지 않습니다. "
         "페이지 데이터베이스의 임직원 칸은 employees 레코드 id 배열입니다. "
         "people 속성에만 list_members의 user_id를 사용합니다. "
         "아래는 스킬 이름과 설명입니다. 본문은 포함되어 있지 않습니다. "
         "사용자 문장이 설명과 맞으면 view_skill로 전문을 읽고 그 절차를 따릅니다. "
-            "레코드나 스킬을 만들거나 고칠 때는 propose 도구만 사용하고, 저장이 끝났다고 말하지 않습니다. "
-            "회사 문서는 search_documents로 찾고 get_document로 본문을 읽습니다. "
-            "개인 문서는 이 사용자 것만 나옵니다.\n"
+        "레코드나 스킬을 만들거나 고칠 때는 propose 도구만 사용하고, 저장이 끝났다고 말하지 않습니다. "
+        "회사 문서는 search_documents로 찾고 get_document로 본문을 읽습니다. "
+        "개인 문서는 이 사용자 것만 나옵니다.\n"
         f"{catalog}"
     )
 
@@ -405,11 +424,12 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
         title = str(arguments.get("title") or "").strip()
         if not slug or not title:
             raise HttpError(400, "영역과 제목이 필요합니다.")
-        _database(user, session.workspace_id, slug)
+        database = _database(user, session.workspace_id, slug)
         values = arguments.get("values") or {}
         blocks = arguments.get("blocks") or []
         if not isinstance(values, dict) or not isinstance(blocks, list):
             raise HttpError(400, "값 형식이 올바르지 않습니다.")
+        values = _prepare_values(database, values)
         action = ProposedAction.objects.create(
             session=session,
             kind=ProposedAction.Kind.CREATE_RECORD,
@@ -429,7 +449,7 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
         if arguments.get("values") is not None:
             if not isinstance(arguments["values"], dict):
                 raise HttpError(400, "값은 객체여야 합니다.")
-            payload["values"] = arguments["values"]
+            payload["values"] = _prepare_values(record.database, arguments["values"])
         action = ProposedAction.objects.create(
             session=session,
             kind=ProposedAction.Kind.UPDATE_RECORD,

@@ -15,7 +15,7 @@ audience: frontend
 
 1. 화면을 다시 열면 `GET /api/v1/agent/session`으로 최근 대화를 가져옵니다. `preview`는 마지막 메시지입니다.
 2. 대화를 누르면 `GET /api/v1/agent/session/{session_id}`의 `messages`를 시간순으로 그립니다. `proposed_actions` 중 `pending`만 확정 버튼에 연결합니다.
-3. 새 대화는 `POST /api/v1/agent/session`에 `workspace_id`를 보냅니다. 한 영역만 다루면 `database_slug`를 넣습니다. 비우면 전체입니다.
+3. 새 대화는 `POST /api/v1/agent/session`에 `workspace_id`를 보냅니다. 한 영역만 다루면 `database_slug`를 넣습니다. 비우면 전체입니다. 대화를 지우면 `DELETE /api/v1/agent/session/{session_id}`입니다.
 4. `POST /api/v1/agent/session/{session_id}/message`에 사용자 문장을 보냅니다.
 5. 응답 `proposed_actions`가 비어 있으면 안내 문장만 보여 줍니다.
 6. 초안이 있으면 내용을 보여주고, 확인 후 `POST /api/v1/agent/session/{session_id}/confirm`에 `action_ids`를 보냅니다.
@@ -26,6 +26,7 @@ audience: frontend
 - `GET /session` 내 최근 대화 50개. `workspace_id` 쿼리면 그 공간만. 항목은 `preview`, `updated_at`
 - `GET /session/{session_id}` 메시지와 초안 전체. 메시지는 오래된 순
 - `POST /session` 대화 시작. 201
+- `DELETE /session/{session_id}` 대화 소프트 삭제. 204. 목록과 상세에서 빠집니다.
 - `POST /session/{session_id}/message` 메시지. 조회는 바로 실행되고 생성·수정은 `pending` 초안입니다.
 - `POST /session/{session_id}/confirm` 초안 확정
 - `GET /skill?workspace_id=` 고정 스킬과 그 공간의 스킬. 고정 스킬은 `source`가 `bundled`이고 `id`가 `null`
@@ -60,6 +61,7 @@ audience: frontend
 - 보내기 전에 문장이 비었는지 확인한다.
 - 응답 문구는 초안일 수 있다는 안내와 함께 보여 준다.
 - 같은 `session_id`로 이어서 보내고, 재진입 때는 상세 조회로 메시지를 복원한다.
+- 대화 삭제는 `DELETE /session/{session_id}`만 호출하고, 204이면 목록에서 뺀다.
 - `proposed_actions`가 `pending`일 때만 확정 버튼을 띄운다.
 - 확정에 성공하면 해당 영역의 표 조회를 다시 불러온다. 스킬 초안이면 스킬 목록을 다시 불러온다.
 - 고정 스킬은 목록에만 보여주고 수정·삭제 버튼을 만들지 않는다. `id`가 `null`이다.

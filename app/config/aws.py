@@ -6,7 +6,7 @@ _s3_client = None
 _ses_client = None
 
 
-async def get_boto3_s3_client():
+def get_s3_client():
     global _s3_client
     if _s3_client is None:
         session = boto3.Session()
@@ -17,6 +17,10 @@ async def get_boto3_s3_client():
             aws_secret_access_key=settings.AWS_SECRET_KEY,
         )
     return _s3_client
+
+
+async def get_boto3_s3_client():
+    return get_s3_client()
 
 
 async def get_boto3_ses_client():

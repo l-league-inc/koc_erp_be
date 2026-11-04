@@ -11,6 +11,7 @@ from ninja.errors import HttpError
 from assistant import llm, skillbook
 from assistant.models import AgentMessage, AgentSession, ProposedAction
 from workspace.models import Property, RecordActivity
+from document.utils import get_file_detail, search_files
 from workspace.utils import (
     accessible_databases,
     create_record,
@@ -157,6 +158,32 @@ _TOOLS = [
                     "enabled": {"type": "boolean"},
                 },
                 "required": ["name"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_documents",
+            "description": "공유 문서함과 내 개인 문서함에서 파일을 검색합니다. 다른 사람의 개인 문서는 나오지 않습니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+                "required": ["q"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_document",
+            "description": "문서 메타, 요약, 추출 본문을 조회합니다. 업로드나 삭제는 하지 않습니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {"file_id": {"type": "integer"}},
+                "required": ["file_id"],
                 "additionalProperties": False,
             },
         },
@@ -325,7 +352,9 @@ def _system_prompt(session: AgentSession, user) -> str:
         "people 속성에만 list_members의 user_id를 사용합니다. "
         "아래는 스킬 이름과 설명입니다. 본문은 포함되어 있지 않습니다. "
         "사용자 문장이 설명과 맞으면 view_skill로 전문을 읽고 그 절차를 따릅니다. "
-        "레코드나 스킬을 만들거나 고칠 때는 propose 도구만 사용하고, 저장이 끝났다고 말하지 않습니다.\n"
+            "레코드나 스킬을 만들거나 고칠 때는 propose 도구만 사용하고, 저장이 끝났다고 말하지 않습니다. "
+            "회사 문서는 search_documents로 찾고 get_document로 본문을 읽습니다. "
+            "개인 문서는 이 사용자 것만 나옵니다.\n"
         f"{catalog}"
     )
 
@@ -420,6 +449,10 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
         )
         created.append(action.id)
         return serialize_action(action)
+    if name == "search_documents":
+        return search_files(user, session.workspace_id, str(arguments.get("q") or ""))
+    if name == "get_document":
+        return get_file_detail(user, session.workspace_id, int(arguments["file_id"]))
     if name == "propose_update_skill":
         action = ProposedAction.objects.create(
             session=session,

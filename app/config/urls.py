@@ -18,6 +18,7 @@ from user.kakaoapi_v2 import router as kakao_v2_router
 from user.tossapi import router as toss_router
 from verification.api import router as verify_router
 from assistant.api import agent_router, workbot_router
+from document.api import router as document_router
 from workspace.api import router as workspace_router
 
 from config.api import router as aws_router
@@ -83,6 +84,7 @@ base_api.add_router("api/v1/notification", notification_router)
 base_api.add_router("api/v1/workspace", workspace_router)
 base_api.add_router("api/v1/agent", agent_router)
 base_api.add_router("api/v1/workbot", workbot_router)
+base_api.add_router("api/v1/document", document_router)
 
 urlpatterns = [
     path(

@@ -71,6 +71,13 @@ PUBLIC_ENDPOINTS = frozenset(
         ("POST", "/api/v1/workbot"),
         WORKBOT_PATCH,
         WORKBOT_RUN,
+        ("GET", "/api/v1/document/{workspace_id}/space"),
+        ("GET", "/api/v1/document/{workspace_id}/folder"),
+        ("GET", "/api/v1/document/{workspace_id}/file"),
+        ("GET", "/api/v1/document/{workspace_id}/file/search"),
+        ("GET", "/api/v1/document/{workspace_id}/file/{file_id}"),
+        ("GET", "/api/v1/document/{workspace_id}/file/{file_id}/mail"),
+        ("POST", "/api/v1/document/{workspace_id}/file/{file_id}/download"),
     }
 )
 OPEN_WORLD_POSTS = frozenset()

@@ -219,3 +219,22 @@ class CollabSocketTests(TransactionTestCase):
         await editor.disconnect()
         await peer.disconnect()
         await page_editor.disconnect()
+
+    async def test_admin_access_rejects_member_op(self):
+        self.database.access = Database.Access.ADMIN
+        await sync_to_async(self.database.save)(update_fields=["access"])
+        member, _sync_message, _presence = await self._open(self.other)
+        await member.send_json_to(
+            {
+                "type": "op",
+                "action": "create",
+                "block": {"type": "paragraph", "content": {"text": "금지"}, "position": 0},
+            }
+        )
+        error = await member.receive_json_from()
+        self.assertEqual(error["type"], "error")
+        self.assertEqual(error["status"], 403)
+        await member.send_json_to({"type": "ping"})
+        pong = await member.receive_json_from()
+        self.assertEqual(pong["type"], "pong")
+        await member.disconnect()

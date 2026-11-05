@@ -56,6 +56,7 @@ class DatabaseResponseSchema(Schema):
     section: str = Field(description="페이지 이름. 묶음이 없으면 빈 문자열입니다.")
     section_slug: str = Field(description="페이지 키. 묶음이 없으면 빈 문자열입니다.")
     position: int = Field(description="정렬 순서")
+    access: str = Field(description="본문 수정 권한. member 또는 admin")
     created_at: datetime
     updated_at: datetime
 
@@ -102,6 +103,28 @@ class RecordQueryResponseSchema(Schema):
     page: int
     page_size: int
     data: list[RecordResponseSchema]
+
+
+class RevisionResponseSchema(Schema):
+    id: int
+    actor_id: Optional[int]
+    actor_name: str
+    created_at: datetime
+
+
+class RevisionDetailResponseSchema(RevisionResponseSchema):
+    body: dict
+
+
+class BlockFileUploadResponseSchema(Schema):
+    upload_url: str
+    object_key: str
+    expires_in: int
+
+
+class BlockFileDownloadResponseSchema(Schema):
+    download_url: str
+    expires_in: int
 
 
 class ActivityResponseSchema(Schema):
@@ -160,6 +183,7 @@ class PageResponseSchema(Schema):
     position: int
     database_id: Optional[int]
     view_id: Optional[int]
+    access: str
     created_at: datetime
     updated_at: datetime
 

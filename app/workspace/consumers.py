@@ -125,7 +125,9 @@ class CollabConsumer(AsyncWebsocketConsumer):
                 await self._join_presence(keep_cursor=True)
                 return
         except HttpError as exc:
-            await self._send({"type": "error", "detail": exc.message})
+            await self._send(
+                {"type": "error", "detail": exc.message, "status": exc.status_code}
+            )
             return
         await self._send({"type": "error", "detail": "지원하지 않는 메시지입니다."})
 

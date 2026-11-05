@@ -8,8 +8,8 @@ KOC 워크스페이스의 데이터 원본은 Django입니다. Notion.com과 동
 |------|------|
 | `Workspace` | 회사 공간. 슬러그 `koc`가 기본 시드 |
 | `WorkspaceMember` | `owner` / `admin` / `member`. 이름 조회는 `GET /{workspace_id}/member` |
-| `Database` | 업무 데이터베이스. `section`은 페이지 이름, `section_slug`는 페이지 키. `seed_koc_workspace` 슬러그는 `hr`, `daily`, `gov`, `purchase`, `sales`, `docs` |
-| `Page` | 사이드바 노드. `folder`, `document`, `database`, `linked_view`. 데이터베이스 페이지는 직계 폴더의 이름과 키를 `section`에 맞춥니다 |
+| `Database` | 업무 데이터베이스. `section`은 페이지 이름, `section_slug`는 페이지 키. `access`는 본문 수정 권한 `member` 또는 `admin`. `seed_koc_workspace` 슬러그는 `hr`, `daily`, `gov`, `purchase`, `sales`, `docs` |
+| `Page` | 사이드바 노드. `folder`, `document`, `database`, `linked_view`. 데이터베이스 페이지는 직계 폴더의 이름과 키를 `section`에 맞춥니다. 문서의 `access`는 그 페이지 블록 수정 권한 |
 | `PageFavorite` | 사용자별 페이지 즐겨찾기 |
 | `Property` | 컬럼. 데이터베이스마다 `title` 타입은 하나 |
 | `Record` | 행이자 페이지. `title`은 제목 속성과 같이 저장되고 `icon`은 페이지 아이콘 |
@@ -17,7 +17,8 @@ KOC 워크스페이스의 데이터 원본은 Django입니다. Notion.com과 동
 | `RelationLink` | relation 속성 연결 |
 | `Block` | 페이지 본문. 기본 블록과 `toggle`, `callout`, `code`, `image`, `simple_table`, `simple_columns`, `math_equation`, `link_preview` |
 | `View` | 표/보드/목록/캘린더/갤러리와 필터. 보드·캘린더·갤러리는 `config`로 기준 속성을 검사 |
-| `RecordActivity` | 생성·수정 스냅샷. `source`는 `user`, `mcp`, `agent`. 조회는 `GET /record/{id}/activity` |
+| `RecordActivity` | 생성·수정 스냅샷. `source`는 `user`, `mcp`, `agent`. 조회는 `GET /record/{id}/activity`. 블록 트리는 넣지 않습니다 |
+| `DocumentRevision` | 레코드 또는 문서 페이지를 고치기 직전 본문. 최근 50건. 조회와 복원은 `GET|POST /record/{id}/revision`, `/page/{id}/revision` |
 | `RecordComment` | 레코드 댓글. 답글은 한 단계 |
 | `DatabaseTemplate` | 새 레코드에 복사할 제목, 값, 블록 |
 
@@ -71,7 +72,8 @@ KOC 워크스페이스의 데이터 원본은 Django입니다. Notion.com과 동
 
 - 멤버가 아닌 워크스페이스 데이터는 403입니다. 없는 id는 404입니다.
 - 워크스페이스 수정은 `owner`와 `admin`, 삭제는 `owner`만 가능합니다.
-- 데이터베이스, 속성, 레코드, 블록, 보기, 템플릿, 댓글 작성, 휴지통 조회와 복원은 멤버라면 가능합니다.
+- 데이터베이스, 속성, 레코드, 블록, 보기, 템플릿, 댓글 작성, 휴지통 조회와 복원은 기본적으로 멤버라면 가능합니다.
+- `Database.access` 또는 문서 `Page.access`가 `admin`이면 그 본문과 레코드 저장은 `owner`, `admin`만 가능합니다. 멤버는 조회, 댓글, 멘션이 되고 저장과 문서방 `op`는 403입니다. 속성·보기 수정은 그대로 멤버가 합니다. `access` 변경은 `owner`, `admin`만 가능합니다.
 - 댓글 삭제는 작성자이거나 `owner`, `admin`만 가능합니다.
 - `GET /api/v1/workspace/{workspace_id}/member`는 멤버의 `user_id`, `name`, `role`을 돌려줍니다. 담당 속성에 넣을 값은 `user_id`입니다.
 - 제목 속성은 지우거나 타입을 바꿀 수 없습니다.

@@ -6,6 +6,7 @@ from ninja import Router
 from api.security import jwt_auth
 from workspace.inbound import (
     BlockCreateSchema,
+    BlockFileUploadSchema,
     BlockUpdateSchema,
     CommentCreateSchema,
     DatabaseCreateSchema,
@@ -28,6 +29,8 @@ from workspace.inbound import (
 )
 from workspace.outbound import (
     ActivityResponseSchema,
+    BlockFileDownloadResponseSchema,
+    BlockFileUploadResponseSchema,
     BlockResponseSchema,
     CommentResponseSchema,
     DatabaseDetailResponseSchema,
@@ -35,6 +38,8 @@ from workspace.outbound import (
     PropertyResponseSchema,
     RecordDetailResponseSchema,
     RecordQueryResponseSchema,
+    RevisionDetailResponseSchema,
+    RevisionResponseSchema,
     TemplateResponseSchema,
     FavoriteResponseSchema,
     PageDetailResponseSchema,
@@ -44,6 +49,15 @@ from workspace.outbound import (
     ViewResponseSchema,
     WorkspaceMemberResponseSchema,
     WorkspaceResponseSchema,
+)
+from workspace.files import create_block_file_download, create_block_file_upload
+from workspace.revisions import (
+    get_page_revision,
+    get_record_revision,
+    list_page_revisions,
+    list_record_revisions,
+    restore_page_revision,
+    restore_record_revision,
 )
 from workspace.tree import (
     create_page,
@@ -543,6 +557,41 @@ async def list_activity_api(request, record_id: int):
 
 
 @router.get(
+    "/record/{record_id}/revision",
+    summary="[C] 본문 개정 목록",
+    description="레코드를 고치기 직전 본문을 최근 50건 조회합니다. 본문은 포함하지 않습니다.",
+    response=list[RevisionResponseSchema],
+    auth=jwt_auth,
+)
+async def list_record_revision_api(request, record_id: int):
+    return await sync_to_async(list_record_revisions)(request.auth, record_id)
+
+
+@router.get(
+    "/record/{record_id}/revision/{revision_id}",
+    summary="[C] 본문 개정 조회",
+    description="레코드 개정의 복원 스냅샷을 조회합니다.",
+    response=RevisionDetailResponseSchema,
+    auth=jwt_auth,
+)
+async def get_record_revision_api(request, record_id: int, revision_id: int):
+    return await sync_to_async(get_record_revision)(request.auth, record_id, revision_id)
+
+
+@router.post(
+    "/record/{record_id}/revision/{revision_id}/restore",
+    summary="[C] 본문 개정 복원",
+    description="레코드 제목, 값, 블록을 그 개정으로 되돌립니다. 되돌리기 직전 본문도 개정으로 남습니다.",
+    response=RecordDetailResponseSchema,
+    auth=jwt_auth,
+)
+async def restore_record_revision_api(request, record_id: int, revision_id: int):
+    return await sync_to_async(restore_record_revision)(
+        request.auth, record_id, revision_id, activity_source(request)
+    )
+
+
+@router.get(
     "/record/{record_id}/comment",
     summary="[C] 댓글 목록 조회",
     description="레코드 댓글을 오래된 순으로 조회합니다.",
@@ -757,6 +806,63 @@ async def list_page_block_api(request, page_id: int):
 async def create_page_block_api(request, page_id: int, payload: BlockCreateSchema):
     block = await sync_to_async(create_page_block)(request.auth, page_id, _dump(payload))
     return 201, block
+
+
+@router.get(
+    "/page/{page_id}/revision",
+    summary="[C] 문서 개정 목록",
+    description="문서 페이지를 고치기 직전 본문을 최근 50건 조회합니다. 본문은 포함하지 않습니다.",
+    response=list[RevisionResponseSchema],
+    auth=jwt_auth,
+)
+async def list_page_revision_api(request, page_id: int):
+    return await sync_to_async(list_page_revisions)(request.auth, page_id)
+
+
+@router.get(
+    "/page/{page_id}/revision/{revision_id}",
+    summary="[C] 문서 개정 조회",
+    description="문서 페이지 개정의 복원 스냅샷을 조회합니다.",
+    response=RevisionDetailResponseSchema,
+    auth=jwt_auth,
+)
+async def get_page_revision_api(request, page_id: int, revision_id: int):
+    return await sync_to_async(get_page_revision)(request.auth, page_id, revision_id)
+
+
+@router.post(
+    "/page/{page_id}/revision/{revision_id}/restore",
+    summary="[C] 문서 개정 복원",
+    description="문서 블록을 그 개정으로 되돌립니다. 되돌리기 직전 본문도 개정으로 남습니다.",
+    response=PageDetailResponseSchema,
+    auth=jwt_auth,
+)
+async def restore_page_revision_api(request, page_id: int, revision_id: int):
+    return await sync_to_async(restore_page_revision)(request.auth, page_id, revision_id)
+
+
+@router.post(
+    "/block/{block_id}/file",
+    summary="[C] 블록 파일 다운로드 URL",
+    description="블록에 저장된 object_key의 다운로드 주소를 만듭니다. 만료는 300초입니다.",
+    response=BlockFileDownloadResponseSchema,
+    auth=jwt_auth,
+)
+async def download_block_file_api(request, block_id: int):
+    return await sync_to_async(create_block_file_download)(request.auth, block_id)
+
+
+@router.post(
+    "/{workspace_id}/block-file",
+    summary="[C] 블록 파일 업로드 URL",
+    description="본문 파일을 비공개 저장소에 올리기 위한 주소를 만듭니다. 만료는 300초입니다.",
+    response=BlockFileUploadResponseSchema,
+    auth=jwt_auth,
+)
+async def upload_block_file_api(request, workspace_id: int, payload: BlockFileUploadSchema):
+    return await sync_to_async(create_block_file_upload)(
+        request.auth, workspace_id, _dump(payload)["file_name"]
+    )
 
 
 @router.post(

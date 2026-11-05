@@ -13,6 +13,25 @@ PRESIGN_EXPIRES = 300
 _FILENAME_SAFE = re.compile(r"[^0-9A-Za-z._\-\uac00-\ud7a3]")
 
 
+def block_file_prefix(workspace_id: int) -> str:
+    return (
+        f"{settings.SERVICE_NAME.lower()}/block-files/"
+        f"{settings.DJANGO_ENV_NAME}/{workspace_id}/"
+    )
+
+
+def build_block_object_key(workspace_id: int, file_name: str) -> str:
+    import uuid
+
+    return f"{block_file_prefix(workspace_id)}{uuid.uuid4().hex}/{safe_filename(file_name)}"
+
+
+def assert_block_object_key(workspace_id: int, object_key: str) -> None:
+    prefix = block_file_prefix(workspace_id)
+    if not object_key or not object_key.startswith(prefix) or ".." in object_key:
+        raise HttpError(400, "이미지 저장 경로가 올바르지 않습니다.")
+
+
 def document_prefix(workspace_id: int) -> str:
     return (
         f"{settings.SERVICE_NAME.lower()}/documents/"

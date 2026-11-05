@@ -253,6 +253,7 @@ def serialize_database(database: Database, *, detail: bool = False) -> dict[str,
         "section": database.section,
         "section_slug": database.section_slug,
         "position": database.position,
+        "access": database.access,
         "created_at": database.created_at,
         "updated_at": database.updated_at,
     }
@@ -988,9 +989,20 @@ def validate_block_content(block_type: str, content: Any, workspace_id: int) -> 
                 raise HttpError(400, "북마크 미리보기는 문자열이어야 합니다.")
         return content
     if block_type == Block.Type.IMAGE:
-        url = content.get("url")
-        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
-            raise HttpError(400, "이미지 URL은 http:// 또는 https://로 시작해야 합니다.")
+        object_key = content.get("object_key")
+        if object_key is not None:
+            if not isinstance(object_key, str):
+                raise HttpError(400, "이미지 저장 경로는 문자열이어야 합니다.")
+            from document.storage import assert_block_object_key
+
+            assert_block_object_key(workspace_id, object_key)
+        else:
+            url = content.get("url")
+            if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+                raise HttpError(400, "이미지는 url 또는 object_key가 필요합니다.")
+        file_name = content.get("file_name")
+        if file_name is not None and not isinstance(file_name, str):
+            raise HttpError(400, "파일 이름은 문자열이어야 합니다.")
         if "rich_text" in content or "text" in content:
             _require_text_or_rich_text(content, workspace_id)
         return content
@@ -1202,6 +1214,11 @@ def update_database(user, database_id: int, data: dict[str, Any]) -> dict[str, A
         database.section_slug = _section_slug(data.get("section_slug"))
     if data.get("position") is not None:
         database.position = data["position"]
+    if "access" in data:
+        from workspace.access import clean_access, require_access_manager
+
+        require_access_manager(user, database.workspace_id)
+        database.access = clean_access(data.get("access"))
 
     def _save():
         database.save()
@@ -1564,7 +1581,10 @@ def delete_record_object(record: Record) -> None:
 
 @transaction.atomic
 def create_record(user, database_id: int, data: dict[str, Any], source: str) -> dict[str, Any]:
+    from workspace.access import require_content_write
+
     database = get_database(user, database_id)
+    require_content_write(user, database=database)
     template = None
     if data.get("template_id") is not None:
         template = get_template(user, int(data["template_id"]))
@@ -1601,7 +1621,12 @@ def create_record(user, database_id: int, data: dict[str, Any], source: str) -> 
 
 @transaction.atomic
 def update_record(user, record_id: int, data: dict[str, Any], source: str) -> dict[str, Any]:
+    from workspace.access import require_content_write
+    from workspace.revisions import after_record_edit, record_body
+
     record = get_record(user, record_id)
+    require_content_write(user, database=record.database)
+    before_body = record_body(record)
     before = _snapshot(record)
     values = dict(data["values"]) if data.get("values") is not None else None
     if data.get("title") is not None:
@@ -1620,6 +1645,7 @@ def update_record(user, record_id: int, data: dict[str, Any], source: str) -> di
     record.save(update_fields=["title", "last_edited_by", "updated_at"])
     after = _snapshot(record)
     log_activity(record, user, RecordActivity.Action.UPDATED, before, after, source)
+    after_record_edit(record, user, before_body)
     publish_workspace_event(
         record.database.workspace_id, "record", "updated", record.id, user.id
     )
@@ -1628,7 +1654,10 @@ def update_record(user, record_id: int, data: dict[str, Any], source: str) -> di
 
 @transaction.atomic
 def delete_record(user, record_id: int) -> None:
+    from workspace.access import require_content_write
+
     record = get_record(user, record_id)
+    require_content_write(user, database=record.database)
     workspace_id = record.database.workspace_id
     deleted_id = record.id
     record.delete()
@@ -1663,7 +1692,12 @@ def _reject_cycle(block: Block, parent: Block | None) -> None:
 
 @transaction.atomic
 def create_block(user, record_id: int, data: dict[str, Any], source: str) -> dict[str, Any]:
+    from workspace.access import require_content_write
+    from workspace.revisions import after_record_edit, record_body
+
     record = get_record(user, record_id)
+    require_content_write(user, database=record.database)
+    before_body = record_body(record)
     before = _snapshot(record)
     block_type = _validate_block_type(str(data.get("type") or ""))
     content = validate_block_content(
@@ -1685,6 +1719,7 @@ def create_block(user, record_id: int, data: dict[str, Any], source: str) -> dic
         record.database.workspace_id, "block", "created", block.id, user.id
     )
     emit_block_collab(block, "created", user.id)
+    after_record_edit(record, user, before_body)
     return serialize_block(block)
 
 
@@ -1693,7 +1728,12 @@ def update_block(user, block_id: int, data: dict[str, Any], source: str) -> dict
     block = get_block(user, block_id)
     if block.record_id is None:
         return _update_page_block(user, block, data)
+    from workspace.access import require_content_write
+    from workspace.revisions import after_record_edit, record_body
+
     record = block.record
+    require_content_write(user, database=record.database)
+    before_body = record_body(record)
     before = _snapshot(record)
     if data.get("type") is not None:
         block.type = _validate_block_type(str(data["type"]))
@@ -1721,11 +1761,17 @@ def update_block(user, block_id: int, data: dict[str, Any], source: str) -> dict
         record.database.workspace_id, "block", "updated", block.id, user.id
     )
     emit_block_collab(block, "updated", user.id)
+    after_record_edit(record, user, before_body)
     return serialize_block(block)
 
 
 def _update_page_block(user, block: Block, data: dict[str, Any]) -> dict[str, Any]:
+    from workspace.access import require_content_write
+    from workspace.revisions import after_page_edit, page_body
+
     page = block.page
+    require_content_write(user, page=page)
+    before_body = page_body(page)
     if data.get("type") is not None:
         block.type = _validate_block_type(str(data["type"]))
     if data.get("content") is not None:
@@ -1743,6 +1789,7 @@ def _update_page_block(user, block: Block, data: dict[str, Any]) -> dict[str, An
     block.save()
     publish_workspace_event(page.workspace_id, "block", "updated", block.id, user.id)
     emit_block_collab(block, "updated", user.id)
+    after_page_edit(page, user, before_body)
     return serialize_block(block)
 
 
@@ -1750,7 +1797,12 @@ def _update_page_block(user, block: Block, data: dict[str, Any]) -> dict[str, An
 def delete_block(user, block_id: int, source: str) -> None:
     block = get_block(user, block_id)
     if block.record_id is None:
+        from workspace.access import require_content_write
+        from workspace.revisions import after_page_edit, page_body
+
         page = block.page
+        require_content_write(user, page=page)
+        before_body = page_body(page)
         deleted_id = block.id
 
         def _walk(current: Block) -> None:
@@ -1760,9 +1812,15 @@ def delete_block(user, block_id: int, source: str) -> None:
 
         emit_block_collab(block, "deleted", user.id)
         _walk(block)
+        after_page_edit(page, user, before_body)
         publish_workspace_event(page.workspace_id, "block", "deleted", deleted_id, user.id)
         return
+    from workspace.access import require_content_write
+    from workspace.revisions import after_record_edit, record_body
+
     record = block.record
+    require_content_write(user, database=record.database)
+    before_body = record_body(record)
     before = _snapshot(record)
 
     def _walk(current: Block) -> None:
@@ -1775,6 +1833,7 @@ def delete_block(user, block_id: int, source: str) -> None:
     record.last_edited_by = user
     record.save(update_fields=["last_edited_by", "updated_at"])
     log_activity(record, user, RecordActivity.Action.UPDATED, before, _snapshot(record), source)
+    after_record_edit(record, user, before_body)
     publish_workspace_event(
         record.database.workspace_id, "block", "deleted", block_id, user.id
     )
@@ -2338,6 +2397,9 @@ def restore_record(user, record_id: int) -> dict[str, Any]:
         raise HttpError(404, "휴지통에서 레코드를 찾을 수 없습니다.")
     if not _membership_exists(user, record.database.workspace_id):
         raise HttpError(403, "워크스페이스에 접근할 수 없습니다.")
+    from workspace.access import require_content_write
+
+    require_content_write(user, database=record.database)
     record.restore()
     publish_workspace_event(
         record.database.workspace_id, "record", "restored", record.id, user.id
@@ -2386,7 +2448,10 @@ def _copy_record_blocks(source: Record, target: Record) -> None:
 
 @transaction.atomic
 def duplicate_record(user, record_id: int, source: str) -> dict[str, Any]:
+    from workspace.access import require_content_write
+
     original = get_record(user, record_id)
+    require_content_write(user, database=original.database)
     title = f"{original.title} 복사"[:300]
     record = Record.objects.create(
         database=original.database,

@@ -80,6 +80,17 @@ class Database(CommonModel):
     section_slug = models.SlugField(max_length=50, blank=True, default="", help_text="페이지 키")
     position = models.PositiveIntegerField(default=0, help_text="정렬 순서")
 
+    class Access(models.TextChoices):
+        MEMBER = ("member", "멤버")
+        ADMIN = ("admin", "관리자")
+
+    access = models.CharField(
+        max_length=10,
+        choices=Access.choices,
+        default=Access.MEMBER,
+        help_text="본문 수정 권한",
+    )
+
     class Meta:
         ordering = ["position", "id"]
         constraints = [
@@ -274,6 +285,12 @@ class Page(CommonModel):
     slug = models.SlugField(max_length=50, blank=True, default="", help_text="폴더 키")
     icon = models.CharField(max_length=50, blank=True, default="", help_text="아이콘")
     position = models.PositiveIntegerField(default=0, help_text="정렬 순서")
+    access = models.CharField(
+        max_length=10,
+        choices=Database.Access.choices,
+        default=Database.Access.MEMBER,
+        help_text="문서 본문 수정 권한",
+    )
     database = models.ForeignKey(
         Database,
         on_delete=models.SET_NULL,
@@ -443,6 +460,51 @@ class View(CommonModel):
 
     def __str__(self) -> str:
         return self.name
+
+
+class DocumentRevision(CommonModel):
+    """레코드나 문서 페이지를 고치기 직전의 본문입니다."""
+
+    record = models.ForeignKey(
+        Record,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="revisions",
+        help_text="레코드",
+    )
+    page = models.ForeignKey(
+        Page,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="revisions",
+        help_text="문서 페이지",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="document_revisions",
+        help_text="고친 사용자",
+    )
+    body = models.JSONField(default=dict, help_text="복원 스냅샷")
+
+    class Meta:
+        ordering = ["-id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(record__isnull=False, page__isnull=True)
+                    | models.Q(record__isnull=True, page__isnull=False)
+                ),
+                name="revision_record_or_page",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.record_id or self.page_id}:{self.id}"
 
 
 class RecordActivity(CommonModel):

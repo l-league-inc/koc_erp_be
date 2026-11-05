@@ -56,6 +56,20 @@ audience: frontend
 
 `annotations`에 없는 키는 400입니다. 허용 키는 `bold`, `italic`, `strikethrough`, `underline`, `code`, `color`입니다. `color`를 뺀 값은 boolean이고 `color`는 문자열입니다. `href`는 `http://` 또는 `https://`이거나 `null`입니다. 멘션 `user`는 같은 워크스페이스 멤버, `record`는 같은 워크스페이스의 살아있는 레코드, `page`는 같은 워크스페이스의 살아있는 페이지여야 합니다.
 
+사용자 멘션이 그 본문에 새로 들어가면 멘션된 사람에게 알림이 갑니다. 저장한 사람 자신, 이미 있던 사용자, `record` 멘션, `page` 멘션은 알림을 만들지 않습니다. 알림 `metadata`는 아래와 같고 메시지는 200자 이내입니다. 화면은 `target`과 `target_id`로 레코드 또는 문서 페이지를 열고 `block_id`로 그 블록까지 이동합니다.
+
+```json
+{
+  "kind": "mention",
+  "workspace_id": 1,
+  "target": "record",
+  "target_id": 12,
+  "block_id": 9
+}
+```
+
+`target`은 `record` 또는 `page`입니다.
+
 인라인 수식은 AppFlowy의 `formula`와 같습니다. `text` 없이 `formula`만 있는 항목도 됩니다. 둘 다 없으면 400입니다.
 
 ```json
@@ -70,7 +84,7 @@ audience: frontend
 | `toggle` | `text` 또는 `rich_text`. 펼침 내용은 `children` |
 | `callout` | `icon` 문자열, `text` 또는 `rich_text` |
 | `code` | `text` 필수, `language` 문자열 |
-| `image` | `url` 필수. 캡션은 `text` 또는 `rich_text` |
+| `image` | `url` 또는 `object_key` 중 하나. 캡션은 `text` 또는 `rich_text` |
 | `to_do` | `checked` boolean. 본문은 `text` 또는 `rich_text` |
 | `divider` | `{}` |
 | `simple_table` | 아래 표 설정. 자식은 `simple_table_row`만 |
@@ -188,6 +202,37 @@ audience: frontend
 {"template_id": 3}
 ```
 
+## 본문 파일
+
+이미 저장된 `https://` 이미지 주소는 그대로 읽습니다. 새로 올리는 파일은 공개 주소 대신 `object_key`를 씁니다.
+
+1. `POST /{workspace_id}/block-file`에 `{file_name}`을 보냅니다. 응답은 `upload_url`, `object_key`, `expires_in`입니다. `expires_in`은 300초입니다.
+2. `upload_url`로 파일을 올립니다.
+3. 이미지 블록 `content`에 그 `object_key`를 넣습니다. 다른 워크스페이스 경로는 400입니다. 표시 이름이 필요하면 `file_name`을 같이 넣습니다.
+4. 본문을 읽을 수 있는 멤버는 `POST /block/{block_id}/file`로 `download_url`과 `expires_in`을 받습니다. 주소도 300초입니다.
+
+```json
+{"type": "image", "content": {"object_key": "koc/block-files/dev/1/abc/사진.png", "file_name": "사진.png"}}
+```
+
+## 본문 개정
+
+블록, 레코드 제목, 아이콘, 값을 바꾸기 직전 본문을 최근 50건 남깁니다. 내용이 같으면 개정은 없습니다. 목록에는 본문이 없고, 한 건 조회에만 `body`가 있습니다.
+
+- `GET /record/{record_id}/revision`, `GET /page/{page_id}/revision`: `id`, `actor_id`, `actor_name`, `created_at`
+- `GET .../revision/{revision_id}`: 위에 `body`를 더합니다. 레코드 `body`는 `title`, `icon`, `values`, `blocks`입니다. 문서 페이지 `body`는 `blocks`입니다.
+- `POST .../revision/{revision_id}/restore`: 그 스냅샷으로 되돌립니다. 되돌리기 직전 본문도 개정으로 남으므로 다시 되돌릴 수 있습니다. 레코드 응답은 상세 레코드이고, 문서 응답은 페이지 상세입니다. 열린 문서방은 `reload`를 받습니다.
+
+문서 페이지가 아니면 개정 API는 400입니다.
+
+## 읽기와 쓰기
+
+데이터베이스와 문서 페이지에 `access`가 있습니다. 값은 `member`(기본) 또는 `admin`입니다. 응답에 항상 있습니다.
+
+`member`이면 지금과 같이 멤버가 본문을 수정합니다. `admin`이면 `owner`와 `admin`만 레코드와 블록을 저장합니다. 멤버의 저장과 문서방 `op`는 403이고, 조회·댓글·멘션은 됩니다. 속성, 보기 수정은 이 값과 관계없이 멤버가 할 수 있습니다.
+
+`access`를 바꾸는 것은 `owner`와 `admin`만 가능합니다. 데이터베이스는 `PATCH /database/{database_id}`에 `access`를 넣고, 그 데이터베이스의 행과 블록이 이 값을 따릅니다. 문서 페이지는 `PATCH /page/{page_id}`에 `access`를 넣고, 그 페이지 블록이 이 값을 따릅니다. 문서가 아닌 페이지에 `access`를 보내면 400입니다.
+
 ## 휴지통
 
 `DELETE /record/{record_id}`는 `deleted_at`만 찍습니다. 속성 값, 블록, 관계는 남아 있습니다. 지운 행은 조회와 상세에서 빠집니다.
@@ -203,13 +248,16 @@ audience: frontend
 - 페이지 헤더에 `icon`과 `title`을 둔다.
 - `rich_text`가 있으면 그 배열을 그리고, 없으면 `text`를 그린다.
 - 토글 자식은 `parent_id`로 찾는다.
-- 이미지 저장 전에 `POST /api/v1/aws/upload`의 `imageURL`을 받는다.
+- 새 이미지는 `POST /{workspace_id}/block-file`의 `object_key`를 블록에 넣고, 볼 때는 `POST /block/{block_id}/file`로 주소를 받는다. 이미 있는 `https` 주소는 그대로 그린다.
 - 댓글 답글 버튼은 `parent_id`가 비어 있는 댓글에만 둔다.
 - 활동과 댓글은 `created_at`으로 한 줄에 섞되, API는 따로 호출한다.
 - 보드 열은 `config.group_by` 속성의 옵션으로 만들고 행은 `values`로 분류한다.
 - 캘린더 칸은 `config.date_property`로 넣고, 월이 바뀌면 날짜 필터를 다시 조회한다.
 - 템플릿으로 만들 때는 `template_id`만 보내고, 사용자가 고친 칸만 추가로 보낸다.
 - 행 삭제 후 휴지통에서 복원하면 상세를 다시 연다.
+- 사용자 멘션 알림의 `metadata.target`으로 레코드 또는 문서 페이지를 열고 `block_id`로 스크롤한다.
+- 개정 목록은 본문 없이 그리고, 미리보기와 복원은 `revision_id`로 호출한다. 복원 뒤 `reload`면 상세를 다시 조회한다.
+- `access`가 `admin`이면 멤버에게 본문 편집을 숨긴다. 조회와 댓글은 남긴다.
 - 사이드바 트리는 `parent_id`로 만들고, 데이터베이스 페이지를 폴더로 옮기면 `section_slug`도 그 폴더를 따른다.
 - `workspace_changed`를 받으면 본문 없이 해당 `entity`를 다시 조회한다.
 - 편집 중인 문서는 [workspace_collab_frontend.md](workspace_collab_frontend.md)의 `sync`와 `collab`로 블록을 맞춘다.
@@ -241,7 +289,7 @@ audience: frontend
 
 - 롤업, 버튼, Notion.com 동기화
 - 글자 단위 병합. 블록 저장과 커서는 [workspace_collab_frontend.md](workspace_collab_frontend.md)입니다
-- 데이터베이스마다 다른 권한. 멤버는 페이지를 읽고 쓸 수 있다.
+- 사용자별 권한, 게스트, 공개 발행. 잠금은 데이터베이스와 문서 페이지의 `access`만 있다.
 - 댓글 서식과 멘션. 댓글 본문은 일반 텍스트다.
 - 블록 단위 휴지통
 - 서버가 보드 열마다 페이지를 나눠 주는 것

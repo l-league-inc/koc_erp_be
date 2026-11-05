@@ -41,6 +41,9 @@ class DatabaseUpdateSchema(Schema):
     section: Optional[str] = Field(None, description="페이지 이름")
     section_slug: Optional[str] = Field(None, description="페이지 키. 빈 문자열이면 묶음이 없습니다.")
     position: Optional[int] = Field(None, description="정렬 순서")
+    access: Optional[str] = Field(
+        None, description="본문 수정 권한. member 또는 admin. 관리자만 바꿀 수 있습니다."
+    )
 
 
 class PropertyCreateSchema(ModelSchema):
@@ -185,6 +188,11 @@ class PageUpdateSchema(Schema):
     icon: Optional[str] = None
     position: Optional[int] = None
     view_id: Optional[int] = None
+    access: Optional[str] = None
+
+
+class BlockFileUploadSchema(Schema):
+    file_name: str
 
 
 class PageMoveSchema(Schema):

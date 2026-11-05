@@ -104,6 +104,7 @@ def serialize_page(page: Page, *, include_blocks: bool = False) -> dict[str, Any
         "position": page.position,
         "database_id": page.database_id,
         "view_id": page.view_id,
+        "access": page.access,
         "created_at": page.created_at,
         "updated_at": page.updated_at,
     }
@@ -214,9 +215,17 @@ def create_page(user, workspace_id: int, data: dict[str, Any]) -> dict[str, Any]
 
 @transaction.atomic
 def update_page(user, page_id: int, data: dict[str, Any]) -> dict[str, Any]:
+    from workspace.access import clean_access, require_access_manager, require_content_write
     from workspace.utils import validate_slug
 
     page = get_page(user, page_id)
+    if "access" in data:
+        if page.kind != Page.Kind.DOCUMENT:
+            raise HttpError(400, "문서 페이지만 접근을 바꿀 수 있습니다.")
+        require_access_manager(user, page.workspace_id)
+        page.access = clean_access(data.get("access"))
+    if page.kind == Page.Kind.DOCUMENT:
+        require_content_write(user, page=page)
     if data.get("name") is not None:
         name = str(data["name"]).strip()
         if not name:
@@ -254,7 +263,10 @@ def update_page(user, page_id: int, data: dict[str, Any]) -> dict[str, Any]:
 
 @transaction.atomic
 def move_page(user, page_id: int, data: dict[str, Any]) -> dict[str, Any]:
+    from workspace.access import require_content_write
+
     page = get_page(user, page_id)
+    require_content_write(user, page=page)
     if "parent_id" not in data:
         raise HttpError(400, "부모 페이지가 필요합니다.")
     parent = _parent_page(user, page.workspace_id, data.get("parent_id"))
@@ -293,7 +305,10 @@ def delete_database_page(user, page: Page) -> None:
 
 @transaction.atomic
 def delete_page(user, page_id: int) -> None:
+    from workspace.access import require_content_write
+
     page = get_page(user, page_id)
+    require_content_write(user, page=page)
     if page.kind == Page.Kind.DATABASE:
         delete_database_page(user, page)
         return
@@ -321,6 +336,9 @@ def restore_page(user, page_id: int) -> dict[str, Any]:
         raise HttpError(404, "휴지통에서 페이지를 찾을 수 없습니다.")
     if not _membership_exists(user, page.workspace_id):
         raise HttpError(403, "워크스페이스에 접근할 수 없습니다.")
+    from workspace.access import require_content_write
+
+    require_content_write(user, page=page)
     page.restore()
     publish_workspace_event(page.workspace_id, "page", "restored", page.id, user.id)
     return serialize_page(page, include_blocks=True)
@@ -410,9 +428,14 @@ def create_page_block(user, page_id: int, data: dict[str, Any]) -> dict[str, Any
         validate_block_content,
     )
 
+    from workspace.access import require_content_write
+    from workspace.revisions import after_page_edit, page_body
+
     page = get_page(user, page_id)
     if page.kind != Page.Kind.DOCUMENT:
         raise HttpError(400, "문서 페이지에만 블록을 추가할 수 있습니다.")
+    require_content_write(user, page=page)
+    before_body = page_body(page)
     block_type = _validate_block_type(str(data.get("type") or ""))
     content = validate_block_content(block_type, data.get("content") or {}, page.workspace_id)
     parent = _block_parent_for_page(user, page, data.get("parent_id"))
@@ -426,6 +449,7 @@ def create_page_block(user, page_id: int, data: dict[str, Any]) -> dict[str, Any
     )
     publish_workspace_event(page.workspace_id, "block", "created", block.id, user.id)
     emit_block_collab(block, "created", user.id)
+    after_page_edit(page, user, before_body)
     return serialize_block(block)
 
 

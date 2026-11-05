@@ -86,10 +86,11 @@ audience: frontend
 
 `action`이 `updated`이면 `block`이 바뀐 블록입니다. `deleted`이면 `block`은 `null`이고, 그 블록의 자식도 함께 지워집니다. `reload`이면 `block_id`와 `block`이 `null`입니다. 레코드 수정 본문에 `blocks`를 넣어 본문을 통째로 바꾼 경우이므로 `GET /record/{id}`로 다시 그립니다.
 
-`error`는 그 소켓의 `op`나 형식이 거절된 것입니다. 연결은 유지됩니다.
+`error`는 그 소켓의 `op`나 형식이 거절된 것입니다. 연결은 유지됩니다. `status`는 HTTP 상태와 같습니다. 데이터베이스나 문서의 `access`가 `admin`인데 멤버가 `op`를 보내면 `status`는 403입니다. 그 멤버도 `sync`, `presence`, `awareness`, `ping`은 할 수 있습니다.
 
 ```json
-{"type": "error", "detail": "표 행은 표 블록 아래에만 둘 수 있습니다."}
+{"type": "error", "detail": "표 행은 표 블록 아래에만 둘 수 있습니다.", "status": 400}
+{"type": "error", "detail": "이 문서는 관리자만 수정할 수 있습니다.", "status": 403}
 ```
 
 `pong`은 `ping`의 응답입니다.
@@ -143,6 +144,7 @@ audience: frontend
 - 커서 이동마다 `awareness`를 보내고, 20초마다 `ping`을 보낸다.
 - 표 행, 표 칸, 단은 부모 없이 만들지 않는다.
 - 워크스페이스를 떠나거나 문서를 닫으면 소켓을 `close`한다.
+- `error.status`가 403이면 편집을 멈추고 본문은 읽기만 한다.
 
 ## 비범위
 

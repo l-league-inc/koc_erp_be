@@ -43,6 +43,29 @@ class LlmRoutingTests(SimpleTestCase):
         self.assertEqual(body["model"], "claude-opus-5-5")
         self.assertNotIn("thinking", body)
 
+    @override_settings(ANTHROPIC_API_KEY="test-key")
+    @patch("assistant.llm.requests.post")
+    def test_haiku_does_not_send_between_tools(self, post):
+        post.return_value.status_code = 200
+        post.return_value.json.return_value = {
+            "content": [{"type": "text", "text": "확인했습니다."}],
+        }
+        complete([{"role": "user", "content": "안녕"}], [], model="claude-haiku-5-5")
+        body = post.call_args.kwargs["json"]
+        self.assertEqual(body["model"], "claude-haiku-5-5")
+        self.assertNotIn("thinking", body)
+
+    @override_settings(ANTHROPIC_API_KEY="test-key")
+    @patch("assistant.llm.requests.post")
+    def test_sonnet_turns_off_upfront_thinking(self, post):
+        post.return_value.status_code = 200
+        post.return_value.json.return_value = {
+            "content": [{"type": "text", "text": "확인했습니다."}],
+        }
+        complete([{"role": "user", "content": "안녕"}], [], model="claude-sonnet-5-5")
+        body = post.call_args.kwargs["json"]
+        self.assertEqual(body["thinking"], {"type": "between_tools"})
+
     @override_settings(ANTHROPIC_API_KEY="")
     def test_missing_anthropic_key_is_unavailable(self):
         with self.assertRaises(HttpError) as caught:

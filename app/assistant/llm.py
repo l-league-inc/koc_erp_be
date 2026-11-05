@@ -1,9 +1,12 @@
 import json
+import logging
 from typing import Any
 
 import requests
 from django.conf import settings
 from ninja.errors import HttpError
+
+logger = logging.getLogger(__name__)
 
 from assistant.models import ModelPreference
 
@@ -140,9 +143,15 @@ def _anthropic_key() -> str:
 def _post(url: str, headers: dict[str, str], body: dict[str, Any]) -> dict[str, Any]:
     try:
         response = requests.post(url, headers=headers, json=body, timeout=_TIMEOUT)
-    except requests.RequestException:
+    except requests.RequestException as exc:
+        logger.error("llm upstream request failed error=%s", type(exc).__name__)
         raise HttpError(502, "언어 모델 호출에 실패했습니다.") from None
     if response.status_code >= 400:
+        logger.error(
+            "llm upstream failed status=%s detail=%s",
+            response.status_code,
+            _upstream_detail(response),
+        )
         raise HttpError(502, "언어 모델 호출에 실패했습니다.")
     try:
         data = response.json()
@@ -151,6 +160,21 @@ def _post(url: str, headers: dict[str, str], body: dict[str, Any]) -> dict[str, 
     if not isinstance(data, dict):
         raise HttpError(502, "언어 모델 응답을 해석하지 못했습니다.")
     return data
+
+
+def _upstream_detail(response: requests.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    error = payload.get("error")
+    if isinstance(error, dict):
+        return str(error.get("message") or "")[:300]
+    if isinstance(error, str):
+        return error[:300]
+    return ""
 
 
 def _function_parameters(tool: dict[str, Any]) -> dict[str, Any]:
@@ -377,7 +401,7 @@ def _anthropic_body(model_id: str, messages: list[dict[str, Any]], tools: list[d
         body["system"] = system
     if tools:
         body["tools"] = _to_anthropic_tools(tools)
-    if model_id in {"claude-haiku-5-5", "claude-sonnet-5-5"}:
+    if model_id == "claude-sonnet-5-5":
         body["thinking"] = {"type": "between_tools"}
     return body
 

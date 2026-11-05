@@ -5,6 +5,7 @@ from typing import Any
 
 from django.db import IntegrityError, transaction
 from django.db.models import OuterRef, Q, QuerySet, Subquery
+from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from ninja.errors import HttpError
 
@@ -320,6 +321,16 @@ def export_value(stored: PropertyValue) -> Any:
     return stored.text_value
 
 
+def _relation_ids(value: Any) -> list[int]:
+    if not isinstance(value, list):
+        return []
+    return [
+        record_id
+        for record_id in value
+        if isinstance(record_id, int) and not isinstance(record_id, bool)
+    ]
+
+
 def _relation_cards(record_ids: list[int]) -> list[dict[str, Any]]:
     if not record_ids:
         return []
@@ -351,32 +362,57 @@ def export_values(record: Record) -> dict[str, Any]:
     for item in stored:
         value = export_value(item)
         if item.property.type == Property.Type.RELATION:
-            ids = value if isinstance(value, list) else []
-            value = _relation_cards(
-                [
-                    record_id
-                    for record_id in ids
-                    if isinstance(record_id, int) and not isinstance(record_id, bool)
-                ]
-            )
+            value = _relation_cards(_relation_ids(value))
         values[item.property.slug] = value
     return values
 
 
-def serialize_record(record: Record, *, include_blocks: bool = False) -> dict[str, Any]:
-    payload = {
+def _record_summary(record: Record, values: dict[str, Any]) -> dict[str, Any]:
+    return {
         "id": record.id,
         "database_id": record.database_id,
         "database_slug": record.database.slug,
         "database_name": record.database.name,
         "title": record.title,
         "icon": record.icon,
-        "values": export_values(record),
+        "values": values,
         "created_by_id": record.created_by_id,
         "last_edited_by_id": record.last_edited_by_id,
         "created_at": record.created_at,
         "updated_at": record.updated_at,
     }
+
+
+def serialize_record_page(records: list[Record]) -> list[dict[str, Any]]:
+    """페이지 안의 속성 값과 관계 카드를 각각 한 번에 읽습니다."""
+    if not records:
+        return []
+    stored_rows = list(
+        PropertyValue.objects.filter(record_id__in=[record.id for record in records])
+        .select_related("property")
+        .order_by("property__position", "property_id")
+    )
+    grouped: dict[int, list[PropertyValue]] = {}
+    relation_ids: list[int] = []
+    for item in stored_rows:
+        grouped.setdefault(item.record_id, []).append(item)
+        if item.property.type == Property.Type.RELATION:
+            relation_ids.extend(_relation_ids(item.json_value))
+    cards = {card["id"]: card for card in _relation_cards(relation_ids)}
+    payloads: list[dict[str, Any]] = []
+    for record in records:
+        values: dict[str, Any] = {}
+        for item in grouped.get(record.id, []):
+            value = export_value(item)
+            if item.property.type == Property.Type.RELATION:
+                value = [cards[record_id] for record_id in _relation_ids(value) if record_id in cards]
+            values[item.property.slug] = value
+        payloads.append(_record_summary(record, values))
+    return payloads
+
+
+def serialize_record(record: Record, *, include_blocks: bool = False) -> dict[str, Any]:
+    payload = _record_summary(record, export_values(record))
     if include_blocks:
         blocks = record.blocks.order_by("position", "id")
         payload["blocks"] = [serialize_block(block) for block in blocks]
@@ -886,6 +922,9 @@ def assert_block_shape(block_type: str, parent_type: str | None) -> None:
 def _validate_rich_text(items: Any, workspace_id: int) -> None:
     if not isinstance(items, list) or not items:
         raise HttpError(400, "rich_text는 한 항목 이상이어야 합니다.")
+    user_ids: list[int] = []
+    record_ids: list[int] = []
+    page_ids: list[int] = []
     for item in items:
         if not isinstance(item, dict):
             raise HttpError(400, "rich_text 항목에는 문자열 text가 필요합니다.")
@@ -923,26 +962,43 @@ def _validate_rich_text(items: Any, workspace_id: int) -> None:
             user_id = mention.get("user_id")
             if isinstance(user_id, bool) or not isinstance(user_id, int):
                 raise HttpError(400, "멘션 사용자는 id여야 합니다.")
-            if not WorkspaceMember.objects.filter(
-                workspace_id=workspace_id, user_id=user_id
-            ).exists():
-                raise HttpError(400, "같은 워크스페이스 멤버만 멘션할 수 있습니다.")
+            user_ids.append(user_id)
         elif mention_type == "record":
             record_id = mention.get("record_id")
             if isinstance(record_id, bool) or not isinstance(record_id, int):
                 raise HttpError(400, "멘션 레코드는 id여야 합니다.")
-            if not Record.objects.filter(
-                id=record_id, database__workspace_id=workspace_id
-            ).exists():
-                raise HttpError(400, "멘션할 수 없는 레코드입니다.")
+            record_ids.append(record_id)
         elif mention_type == "page":
             page_id = mention.get("page_id")
             if isinstance(page_id, bool) or not isinstance(page_id, int):
                 raise HttpError(400, "멘션 페이지는 id여야 합니다.")
-            if not Page.objects.filter(id=page_id, workspace_id=workspace_id).exists():
-                raise HttpError(400, "멘션할 수 없는 페이지입니다.")
+            page_ids.append(page_id)
         else:
             raise HttpError(400, "멘션 타입은 user, record, page입니다.")
+    if user_ids:
+        found = set(
+            WorkspaceMember.objects.filter(
+                workspace_id=workspace_id, user_id__in=user_ids
+            ).values_list("user_id", flat=True)
+        )
+        if any(user_id not in found for user_id in user_ids):
+            raise HttpError(400, "같은 워크스페이스 멤버만 멘션할 수 있습니다.")
+    if record_ids:
+        found = set(
+            Record.objects.filter(
+                id__in=record_ids, database__workspace_id=workspace_id
+            ).values_list("id", flat=True)
+        )
+        if any(record_id not in found for record_id in record_ids):
+            raise HttpError(400, "멘션할 수 없는 레코드입니다.")
+    if page_ids:
+        found = set(
+            Page.objects.filter(id__in=page_ids, workspace_id=workspace_id).values_list(
+                "id", flat=True
+            )
+        )
+        if any(page_id not in found for page_id in page_ids):
+            raise HttpError(400, "멘션할 수 없는 페이지입니다.")
 
 
 def _require_text_or_rich_text(content: dict, workspace_id: int) -> None:
@@ -1046,9 +1102,32 @@ def create_block_tree(
         create_block_tree(record, data.get("children") or [], created, page)
 
 
+def _subtree_ids(root: Block) -> list[int]:
+    if root.record_id:
+        rows = Block.objects.filter(record_id=root.record_id).values_list("id", "parent_id")
+    else:
+        rows = Block.objects.filter(page_id=root.page_id).values_list("id", "parent_id")
+    children: dict[int | None, list[int]] = {}
+    for block_id, parent_id in rows:
+        children.setdefault(parent_id, []).append(block_id)
+    collected: list[int] = []
+
+    def walk(block_id: int) -> None:
+        for child_id in children.get(block_id, []):
+            walk(child_id)
+        collected.append(block_id)
+
+    walk(root.id)
+    return collected
+
+
+def soft_delete_blocks(block_ids: list[int]) -> None:
+    if block_ids:
+        Block.objects.filter(id__in=block_ids).update(deleted_at=timezone.now())
+
+
 def replace_blocks(record: Record, blocks: list[dict], actor_id: int | None = None) -> None:
-    for block in list(record.blocks.all()):
-        block.delete()
+    soft_delete_blocks(list(record.blocks.values_list("id", flat=True)))
     create_block_tree(record, blocks, None)
     publish_collab_event("record", record.id, "reload", actor_id, None, None)
 
@@ -1564,16 +1643,20 @@ def delete_record_object(record: Record) -> None:
     for link in RelationLink.objects.filter(Q(from_record=record) | Q(to_record=record)):
         if link.from_record_id != record.id:
             affected.add((link.property_id, link.from_record_id))
-    for stored in PropertyValue.objects.filter(record=record):
-        stored.delete()
-    for link in RelationLink.objects.filter(Q(from_record=record) | Q(to_record=record)):
-        link.delete()
+    deleted_at = timezone.now()
+    PropertyValue.objects.filter(record=record).update(deleted_at=deleted_at)
+    RelationLink.objects.filter(Q(from_record=record) | Q(to_record=record)).update(
+        deleted_at=deleted_at
+    )
+    props = {
+        prop.id: prop
+        for prop in Property.objects.filter(id__in={property_id for property_id, _record_id in affected})
+    }
     for property_id, record_id in affected:
-        prop = Property.objects.filter(id=property_id).first()
+        prop = props.get(property_id)
         if prop is not None:
             _write_relation_ids(prop, record_id)
-    for block in list(record.blocks.all()):
-        block.delete()
+    soft_delete_blocks(list(record.blocks.values_list("id", flat=True)))
     record.delete()
 
 
@@ -1803,13 +1886,8 @@ def delete_block(user, block_id: int, source: str) -> None:
         before_body = page_body(page)
         deleted_id = block.id
 
-        def _walk(current: Block) -> None:
-            for child in list(current.children.all()):
-                _walk(child)
-            current.delete()
-
         emit_block_collab(block, "deleted", user.id)
-        _walk(block)
+        soft_delete_blocks(_subtree_ids(block))
         after_page_edit(page, user, before_body)
         publish_workspace_event(page.workspace_id, "block", "deleted", deleted_id, user.id)
         return
@@ -1821,13 +1899,8 @@ def delete_block(user, block_id: int, source: str) -> None:
     before_body = record_body(record)
     before = _snapshot(record)
 
-    def _walk(current: Block) -> None:
-        for child in list(current.children.all()):
-            _walk(child)
-        current.delete()
-
     emit_block_collab(block, "deleted", user.id)
-    _walk(block)
+    soft_delete_blocks(_subtree_ids(block))
     record.last_edited_by = user
     record.save(update_fields=["last_edited_by", "updated_at"])
     log_activity(record, user, RecordActivity.Action.UPDATED, before, _snapshot(record), source)
@@ -2086,6 +2159,9 @@ def query_records(user, data: dict[str, Any]) -> dict[str, Any]:
         databases = databases.filter(slug=str(data["database_slug"]))
         if not databases.exists():
             raise HttpError(404, "데이터베이스를 찾을 수 없습니다.")
+    if data.get("workspace_id"):
+        get_membership(user, int(data["workspace_id"]))
+        databases = databases.filter(workspace_id=int(data["workspace_id"]))
 
     qs = Record.objects.filter(database__in=databases).select_related("database")
     keyword = (data.get("q") or "").strip()
@@ -2127,12 +2203,12 @@ def query_records(user, data: dict[str, Any]) -> dict[str, Any]:
     qs = qs.order_by(*order)
     total = qs.count()
     start = (page - 1) * page_size
-    rows = qs[start : start + page_size]
+    rows = list(qs[start : start + page_size])
     return {
         "count": total,
         "page": page,
         "page_size": page_size,
-        "data": [serialize_record(row) for row in rows],
+        "data": serialize_record_page(rows),
     }
 
 

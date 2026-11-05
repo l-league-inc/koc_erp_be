@@ -176,10 +176,9 @@ def get_page_revision(user, page_id: int, revision_id: int) -> dict[str, Any]:
 
 def _replace_page_blocks(page: Page, blocks: list[dict], actor_id: int | None) -> None:
     from workspace.events import publish_collab_event
-    from workspace.utils import create_block_tree
+    from workspace.utils import create_block_tree, soft_delete_blocks
 
-    for block in list(page.blocks.all()):
-        block.delete()
+    soft_delete_blocks(list(page.blocks.values_list("id", flat=True)))
     create_block_tree(None, blocks, None, page)
     publish_collab_event("page", page.id, "reload", actor_id, None, None)
 

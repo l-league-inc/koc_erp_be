@@ -1,13 +1,16 @@
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from ninja.testing import TestAsyncClient
 
 from user.utils import get_access_token
 from workspace.api import router
-from workspace.models import Page, Property, RelationLink
+from workspace.models import Database, Page, Property, RelationLink
 from workspace.seed import seed_koc_workspace
+from workspace.utils import create_record, query_records
 
 User = get_user_model()
 
@@ -160,6 +163,20 @@ class NotionWorkspaceTests(TestCase):
         )
         self.assertEqual(grouped.status_code, 200, grouped.json())
         self.assertEqual(grouped.json()["data"][0]["title"], "표제")
+
+    def test_query_value_lookups_do_not_grow_with_rows(self):
+        sales = Database.objects.get(workspace=self.workspace, slug="sales")
+        create_record(self.user, sales.id, {"title": "하나", "values": {"kind": "A/S"}}, "user")
+        with CaptureQueriesContext(connection) as first:
+            query_records(self.user, {"database_slug": "sales", "page_size": 20})
+        create_record(self.user, sales.id, {"title": "둘", "values": {"kind": "견적"}}, "user")
+        create_record(self.user, sales.id, {"title": "셋", "values": {"kind": "A/S"}}, "user")
+        with CaptureQueriesContext(connection) as second:
+            result = query_records(self.user, {"database_slug": "sales", "page_size": 20})
+        self.assertEqual(len(first.captured_queries), len(second.captured_queries))
+        row = next(item for item in result["data"] if item["title"] == "셋")
+        self.assertEqual(row["values"]["kind"], "A/S")
+        self.assertEqual(row["database_slug"], "sales")
 
     async def test_search_returns_document_and_record(self):
         await self.client.post(

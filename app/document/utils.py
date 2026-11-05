@@ -51,8 +51,9 @@ def list_folders(user, workspace_id: int, space_id: int, parent_id: int | None) 
         parent = _root_folder(space)
     else:
         parent = _folder_in_space(space, parent_id)
-    folders = DocumentFolder.objects.filter(parent=parent).order_by("name", "id")
-    return [serialize_folder(folder) for folder in folders]
+    folders = list(DocumentFolder.objects.filter(parent=parent).order_by("name", "id"))
+    paths = ancestor_paths(folders)
+    return [serialize_folder(folder, path=paths[folder.id]) for folder in folders]
 
 
 def create_folder(user, workspace_id: int, parent_id: int, name: str) -> dict:
@@ -165,12 +166,13 @@ def create_file(user, workspace_id: int, data: dict) -> dict:
 
 def list_files(user, workspace_id: int, folder_id: int) -> list[dict]:
     _membership, folder = _get_folder(user, workspace_id, folder_id)
-    files = (
+    files = list(
         DocumentFile.objects.filter(folder=folder)
         .select_related("folder__space", "index", "uploaded_by")
         .order_by("-created_at", "-id")
     )
-    return [serialize_file(file, detail=False) for file in files]
+    paths = ancestor_paths([file.folder for file in files])
+    return [serialize_file(file, detail=False, path=paths[file.folder_id]) for file in files]
 
 
 def get_file_detail(user, workspace_id: int, file_id: int) -> dict:
@@ -226,8 +228,10 @@ def search_files(user, workspace_id: int, keyword: str) -> list[dict]:
         )
         .order_by("-rank", "-file__created_at", "-file_id")[:20]
     )
+    indexes = list(rows)
+    paths = ancestor_paths([index.file.folder for index in indexes])
     hits = []
-    for index in rows:
+    for index in indexes:
         score = float(index.rank or 0)
         if score <= 0:
             score = 0.01
@@ -236,7 +240,7 @@ def search_files(user, workspace_id: int, keyword: str) -> list[dict]:
                 "id": index.file_id,
                 "original_filename": index.file.original_filename,
                 "folder_id": index.file.folder_id,
-                "folder_path": folder_path(index.file.folder),
+                "folder_path": paths[index.file.folder_id],
                 "description_ko": index.description_ko,
                 "score": score,
             }
@@ -298,22 +302,25 @@ def serialize_space(space: DocumentSpace) -> dict:
     }
 
 
-def serialize_folder(folder: DocumentFolder) -> dict:
+def serialize_folder(folder: DocumentFolder, *, path: str | None = None) -> dict:
     return {
         "id": folder.id,
         "space_id": folder.space_id,
         "parent_id": folder.parent_id,
         "name": folder.name,
         "is_root": folder.is_root,
-        "path": folder_path(folder),
+        "path": folder_path(folder) if path is None else path,
         "created_at": folder.created_at,
     }
 
 
-def serialize_file(file: DocumentFile, *, detail: bool) -> dict:
+def serialize_file(file: DocumentFile, *, detail: bool, path: str | None = None) -> dict:
     folder = file.folder
     space = folder.space
     index = _index_of(file)
+    file_path = _file_path(folder, file.original_filename) if path is None else (
+        f"{path}/{file.original_filename}" if path else file.original_filename
+    )
     payload = {
         "id": file.id,
         "workspace_id": space.workspace_id,
@@ -324,7 +331,7 @@ def serialize_file(file: DocumentFile, *, detail: bool) -> dict:
         "content_type": file.content_type,
         "size": file.size,
         "uploaded_by_id": file.uploaded_by_id,
-        "path": _file_path(folder, file.original_filename),
+        "path": file_path,
         "index_status": index.index_status if index else DocumentIndex.Status.PENDING,
         "index_source": index.index_source if index else DocumentIndex.Source.LOCAL,
         "description_ko": index.description_ko if index else "",
@@ -350,6 +357,39 @@ def serialize_mail_log(log: DocumentMailLog) -> dict:
         "error": log.error,
         "created_at": log.created_at,
     }
+
+
+def ancestor_paths(folders: list[DocumentFolder]) -> dict[int, str]:
+    """폴더마다 부모를 다시 조회하지 않고 경로를 만듭니다."""
+    cache = {folder.id: folder for folder in folders}
+    pending = {
+        folder.parent_id
+        for folder in folders
+        if folder.parent_id and folder.parent_id not in cache
+    }
+    while pending:
+        rows = list(DocumentFolder.objects.filter(id__in=pending))
+        pending = set()
+        for row in rows:
+            cache[row.id] = row
+            if row.parent_id and row.parent_id not in cache:
+                pending.add(row.parent_id)
+
+    def build(folder: DocumentFolder) -> str:
+        names: list[str] = []
+        seen: set[int] = set()
+        current_id = folder.id
+        while current_id and current_id not in seen:
+            seen.add(current_id)
+            current = cache.get(current_id)
+            if current is None or current.is_root:
+                break
+            names.append(current.name)
+            current_id = current.parent_id
+        names.reverse()
+        return "/".join(names)
+
+    return {folder.id: build(folder) for folder in folders}
 
 
 def folder_path(folder: DocumentFolder) -> str:

@@ -402,23 +402,16 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
                 user,
                 {"database_slug": slug, "filters": filters, "q": keyword, "page": 1, "page_size": 20},
             )
-        rows: list[dict[str, Any]] = []
-        total = 0
-        databases = accessible_databases(user).filter(workspace_id=session.workspace_id)
-        for database in databases:
-            result = query_records(
-                user,
-                {
-                    "database_id": database.id,
-                    "filters": filters,
-                    "q": keyword,
-                    "page": 1,
-                    "page_size": 20,
-                },
-            )
-            total += result["count"]
-            rows.extend(result["data"])
-        return {"count": total, "page": 1, "page_size": 20, "data": rows[:20]}
+        return query_records(
+            user,
+            {
+                "workspace_id": session.workspace_id,
+                "filters": filters,
+                "q": keyword,
+                "page": 1,
+                "page_size": 20,
+            },
+        )
     if name == "propose_create_record":
         slug = _scoped_slug(session, str(arguments.get("database_slug") or ""))
         title = str(arguments.get("title") or "").strip()

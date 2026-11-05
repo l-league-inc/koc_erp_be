@@ -137,6 +137,19 @@ class ActivityResponseSchema(Schema):
     created_at: datetime
 
 
+class BlockCommentResponseSchema(Schema):
+    id: int
+    block_id: int
+    parent_id: Optional[int]
+    author_id: Optional[int]
+    author_name: str
+    body: str
+    resolved_at: Optional[datetime]
+    resolved_by_id: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+
 class CommentResponseSchema(Schema):
     id: int
     record_id: int

@@ -285,12 +285,22 @@ audience: frontend
 
 연결, 페이로드, 대상별 다시 조회는 [workspace_realtime_frontend.md](workspace_realtime_frontend.md)입니다. 경로는 `ws/workspace/{workspace_id}/`이고, 메시지는 `workspace_changed`만 옵니다.
 
+## 블록 댓글
+
+레코드 하단 댓글과 별도입니다. 레코드 블록과 문서 페이지 블록 모두 달 수 있습니다. `access`가 `admin`이어도 본문을 읽을 수 있으면 댓글을 답니다. 본문은 일반 텍스트이고 멘션 알림은 없습니다.
+
+- `GET|POST /block/{block_id}/comment`. 작성은 `{body, parent_id}`. `parent_id`가 있으면 답글이고, 답글의 답글은 400입니다.
+- `POST /block-comment/{comment_id}/resolve`, `POST .../unresolve`. 루트 댓글만 해결 표시를 합니다. 응답의 `resolved_at`이 있으면 해결된 댓글입니다.
+- `DELETE /block-comment/{comment_id}`.
+
+삭제와 해결 표시는 작성자이거나 `owner`, `admin`만 가능합니다. 워크스페이스 소켓 `block_comment`를 받으면 그 블록 댓글을 다시 조회합니다.
+
 ## 비범위
 
 - 롤업, 버튼, Notion.com 동기화
 - 글자 단위 병합. 블록 저장과 커서는 [workspace_collab_frontend.md](workspace_collab_frontend.md)입니다
 - 사용자별 권한, 게스트, 공개 발행. 잠금은 데이터베이스와 문서 페이지의 `access`만 있다.
-- 댓글 서식과 멘션. 댓글 본문은 일반 텍스트다.
+- 댓글 서식과 멘션. 레코드 하단 댓글과 블록 댓글 본문은 일반 텍스트다.
 - 블록 단위 휴지통
 - 서버가 보드 열마다 페이지를 나눠 주는 것
 - MCP로 댓글, 템플릿, 휴지통, 복원을 여는 것

@@ -11,6 +11,8 @@ from workspace.collab import (
     clean_awareness,
     document_blocks,
     drop_presence,
+    opening_payload,
+    parse_since,
     presence_payload,
     touch_presence,
 )
@@ -75,8 +77,8 @@ class CollabConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
         people = await self._join_presence()
-        blocks = await self._blocks()
-        await self._send({"type": "sync", "target": self.target, "target_id": self.target_id, "blocks": blocks})
+        opening = await self._opening()
+        await self._send(opening)
         await self._send(presence_payload(people))
         await self._broadcast(presence_payload(people))
 
@@ -153,9 +155,15 @@ class CollabConsumer(AsyncWebsocketConsumer):
             return False
 
     @database_sync_to_async
-    def _blocks(self):
-        blocks = document_blocks(self.user, self.workspace_id, self.target, self.target_id)
-        return blocks or []
+    def _opening(self):
+        payload = opening_payload(
+            self.user,
+            self.workspace_id,
+            self.target,
+            self.target_id,
+            parse_since(self.scope.get("query_string")),
+        )
+        return payload or {"type": "sync", "target": self.target, "target_id": self.target_id, "seq": 0, "blocks": []}
 
     @database_sync_to_async
     def _join_presence(self, cursor=None, selection=None, keep_cursor: bool = False):

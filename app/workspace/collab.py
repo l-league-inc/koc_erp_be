@@ -2,11 +2,12 @@
 
 import time
 from typing import Any
+from urllib.parse import parse_qs
 
 from django.core.cache import cache
 from ninja.errors import HttpError
 
-from workspace.models import Page
+from workspace.models import CollabEvent, Page, Record
 from workspace.tree import create_page_block, get_page, list_page_blocks
 from workspace.utils import create_block, delete_block, get_block, get_record, serialize_block, update_block
 
@@ -15,6 +16,69 @@ PRESENCE_TTL = 45
 
 def room_key(target: str, target_id: int) -> str:
     return f"collab-presence:{target}:{target_id}"
+
+
+def parse_since(query_string: bytes | str | None) -> int | None:
+    if not query_string:
+        return None
+    if isinstance(query_string, bytes):
+        query_string = query_string.decode()
+    raw = (parse_qs(query_string).get("since") or [None])[0]
+    if raw is None or not str(raw).isdigit():
+        return None
+    return int(raw)
+
+
+def _current_seq(target: str, target_id: int) -> int:
+    if target == "record":
+        seq = Record.objects.filter(id=target_id).values_list("collab_seq", flat=True).first()
+    else:
+        seq = Page.objects.filter(id=target_id).values_list("collab_seq", flat=True).first()
+    return int(seq or 0)
+
+
+def _event_body(event: CollabEvent) -> dict[str, Any]:
+    return {
+        "seq": event.seq,
+        "action": event.action,
+        "actor_id": event.actor_id,
+        "block_id": event.block_id,
+        "block": event.block,
+    }
+
+
+def opening_payload(
+    user,
+    workspace_id: int,
+    target: str,
+    target_id: int,
+    since: int | None,
+) -> dict[str, Any] | None:
+    blocks = document_blocks(user, workspace_id, target, target_id)
+    if blocks is None:
+        return None
+    seq = _current_seq(target, target_id)
+    full = {"type": "sync", "target": target, "target_id": target_id, "seq": seq, "blocks": blocks}
+    if since is None or since > seq:
+        return full
+    if since == seq:
+        return {"type": "catchup", "target": target, "target_id": target_id, "seq": seq, "events": []}
+    stored = CollabEvent.objects.filter(seq__gt=since, seq__lte=seq)
+    if target == "record":
+        stored = stored.filter(record_id=target_id)
+    else:
+        stored = stored.filter(page_id=target_id)
+    events = list(stored.order_by("seq"))
+    expected = list(range(since + 1, seq + 1))
+    if [event.seq for event in events] != expected or any(event.action == "reload" for event in events):
+        return full
+    return {
+        "type": "catchup",
+        "target": target,
+        "target_id": target_id,
+        "seq": seq,
+        "events": [_event_body(event) for event in events],
+    }
 
 
 def document_blocks(user, workspace_id: int, target: str, target_id: int) -> list[dict[str, Any]] | None:

@@ -56,6 +56,7 @@ audience: frontend
 | `record` | `deleted` | 표에서 빼고, 그 상세가 열려 있으면 닫습니다. 휴지통이 열려 있으면 `GET /{workspace_id}/trash` |
 | `block` | `created`, `updated`, `deleted` | 열린 레코드나 문서의 블록 목록. 레코드는 `GET /record/{id}`, 문서는 `GET /page/{id}` |
 | `comment` | `created`, `deleted` | 열린 레코드의 `GET /record/{id}/comment` |
+| `block_comment` | `created`, `updated`, `deleted` | 그 블록의 `GET /block/{id}/comment`. 이벤트 `id`는 댓글 id입니다 |
 | `database` | `created`, `updated`, `deleted` | `GET /database`와, 열려 있으면 `GET /database/{id}`. `deleted`일 때 속한 레코드마다 `record` `deleted`는 오지 않습니다 |
 | `property` | `created`, `updated`, `deleted` | 그 데이터베이스 `GET /database/{id}`의 `properties`. `id`는 속성 id입니다 |
 | `view` | `created`, `updated`, `deleted` | 그 데이터베이스 상세의 `views`. 열린 보기가 지워졌으면 다른 보기로 옮깁니다 |

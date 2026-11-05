@@ -15,11 +15,13 @@ KOC 워크스페이스의 데이터 원본은 Django입니다. Notion.com과 동
 | `Record` | 행이자 페이지. `title`은 제목 속성과 같이 저장되고 `icon`은 페이지 아이콘 |
 | `PropertyValue` | 타입별 값. `(record, property)`는 삭제되지 않은 행만 유니크 |
 | `RelationLink` | relation 속성 연결 |
-| `Block` | 페이지 본문. 기본 블록과 `toggle`, `callout`, `code`, `image`, `simple_table`, `simple_columns`, `math_equation`, `link_preview` |
+| `Block` | 페이지 본문. 기본 블록과 `toggle`, `callout`, `code`, `image`, `simple_table`, `simple_columns`, `math_equation`, `link_preview`. `plain_text`는 검색에 쓰는 보이는 글 |
 | `View` | 표/보드/목록/캘린더/갤러리와 필터. 보드·캘린더·갤러리는 `config`로 기준 속성을 검사 |
 | `RecordActivity` | 생성·수정 스냅샷. `source`는 `user`, `mcp`, `agent`. 조회는 `GET /record/{id}/activity`. 블록 트리는 넣지 않습니다 |
 | `DocumentRevision` | 레코드 또는 문서 페이지를 고치기 직전 본문. 최근 50건. 조회와 복원은 `GET|POST /record/{id}/revision`, `/page/{id}/revision` |
-| `RecordComment` | 레코드 댓글. 답글은 한 단계 |
+| `RecordComment` | 레코드 하단 댓글. 답글은 한 단계 |
+| `BlockComment` | 블록 댓글. 답글은 한 단계. 루트만 `resolved_at`으로 해결 표시 |
+| `CollabEvent` | 문서방 블록 변경. `collab_seq`와 함께 최근 100건. `since`로 빠진 변경만 전달 |
 | `DatabaseTemplate` | 새 레코드에 복사할 제목, 값, 블록 |
 
 롤업, 버튼, Notion 동기화, 글자 단위 병합은 없습니다. 수식과 북마크, 본문 표, 다단은 블록으로 저장합니다. 같은 문서를 연 멤버에게는 블록 변경과 커서를 알립니다.
@@ -28,7 +30,7 @@ KOC 워크스페이스의 데이터 원본은 Django입니다. Notion.com과 동
 
 ## 조회
 
-- `q`는 제목, 속성 텍스트, 블록 본문을 봅니다.
+- `q`는 제목, 속성 텍스트, 블록의 보이는 글을 봅니다. 서식 키와 파일 경로는 보지 않습니다.
 - 필터 목록은 AND입니다. `{op: "and"|"or", filters: [...]}` 그룹은 한 단계 더 중첩할 수 있습니다.
 - `created_at`, `updated_at`, `created_by`, `last_edited_by`는 속성 행 없이 필터와 정렬에 쓸 수 있습니다.
 - 관계 값을 읽을 때는 `{id, title, database_id, database_slug}`이고, 쓸 때는 레코드 id 배열입니다.

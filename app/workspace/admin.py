@@ -2,6 +2,8 @@ from django.contrib import admin
 
 from workspace.models import (
     Block,
+    BlockComment,
+    CollabEvent,
     Database,
     DatabaseTemplate,
     Page,
@@ -90,6 +92,16 @@ class RecordActivityAdmin(admin.ModelAdmin):
 @admin.register(RecordComment)
 class RecordCommentAdmin(admin.ModelAdmin):
     list_display = ["id", "record", "author", "parent", "created_at"]
+
+
+@admin.register(BlockComment)
+class BlockCommentAdmin(admin.ModelAdmin):
+    list_display = ["id", "block", "author", "parent", "resolved_at"]
+
+
+@admin.register(CollabEvent)
+class CollabEventAdmin(admin.ModelAdmin):
+    list_display = ["id", "record", "page", "seq", "action", "block_id"]
 
 
 @admin.register(DatabaseTemplate)

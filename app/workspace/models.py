@@ -182,6 +182,7 @@ class Record(CommonModel):
         related_name="edited_workspace_records",
         help_text="마지막 수정자",
     )
+    collab_seq = models.PositiveIntegerField(default=0, help_text="문서방 변경 번호")
 
     def __str__(self) -> str:
         return self.title
@@ -291,6 +292,7 @@ class Page(CommonModel):
         default=Database.Access.MEMBER,
         help_text="문서 본문 수정 권한",
     )
+    collab_seq = models.PositiveIntegerField(default=0, help_text="문서방 변경 번호")
     database = models.ForeignKey(
         Database,
         on_delete=models.SET_NULL,
@@ -409,6 +411,7 @@ class Block(CommonModel):
     )
     type = models.CharField(max_length=20, choices=Type.choices, help_text="블록 타입")
     content = models.JSONField(default=dict, help_text="블록 내용")
+    plain_text = models.TextField(blank=True, default="", help_text="검색용 본문")
     position = models.PositiveIntegerField(default=0, help_text="정렬 순서")
 
     class Meta:
@@ -422,6 +425,15 @@ class Block(CommonModel):
                 name="block_record_or_page",
             )
         ]
+
+    def save(self, *args, **kwargs):
+        from workspace.text import extract_plain_text
+
+        self.plain_text = extract_plain_text(self.content or {})
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            kwargs["update_fields"] = list(set(update_fields) | {"plain_text"})
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return f"{self.record_id or self.page_id}:{self.type}"
@@ -507,6 +519,64 @@ class DocumentRevision(CommonModel):
         return f"{self.record_id or self.page_id}:{self.id}"
 
 
+class CollabEvent(CommonModel):
+    """문서방에 커밋된 블록 변경입니다. 문서마다 최근 100건만 남습니다."""
+
+    record = models.ForeignKey(
+        Record,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="collab_events",
+        help_text="레코드",
+    )
+    page = models.ForeignKey(
+        Page,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="collab_events",
+        help_text="문서 페이지",
+    )
+    seq = models.PositiveIntegerField(help_text="변경 번호")
+    action = models.CharField(max_length=20, help_text="동작")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="workspace_collab_events",
+        help_text="저장한 사용자",
+    )
+    block_id = models.PositiveIntegerField(null=True, blank=True, help_text="블록")
+    block = models.JSONField(null=True, blank=True, help_text="블록 스냅샷")
+
+    class Meta:
+        ordering = ["seq"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(record__isnull=False, page__isnull=True)
+                    | models.Q(record__isnull=True, page__isnull=False)
+                ),
+                name="collab_event_record_or_page",
+            ),
+            models.UniqueConstraint(
+                fields=["record", "seq"],
+                condition=models.Q(deleted_at__isnull=True, record__isnull=False),
+                name="unique_record_collab_seq",
+            ),
+            models.UniqueConstraint(
+                fields=["page", "seq"],
+                condition=models.Q(deleted_at__isnull=True, page__isnull=False),
+                name="unique_page_collab_seq",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.record_id or self.page_id}:{self.seq}"
+
+
 class RecordActivity(CommonModel):
     """레코드 생성·수정 스냅샷입니다."""
 
@@ -575,6 +645,49 @@ class RecordComment(CommonModel):
 
     def __str__(self) -> str:
         return f"{self.record_id}:{self.id}"
+
+
+class BlockComment(CommonModel):
+    """블록에 다는 댓글입니다. 답글은 한 단계이고, 루트만 해결 표시를 합니다."""
+
+    block = models.ForeignKey(
+        Block,
+        on_delete=models.CASCADE,
+        related_name="comments",
+        help_text="블록",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="workspace_block_comments",
+        help_text="작성자",
+    )
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="replies",
+        help_text="부모 댓글",
+    )
+    body = models.TextField(help_text="본문")
+    resolved_at = models.DateTimeField(null=True, blank=True, help_text="해결 시각")
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="resolved_block_comments",
+        help_text="해결한 사용자",
+    )
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return f"{self.block_id}:{self.id}"
 
 
 class DatabaseTemplate(CommonModel):

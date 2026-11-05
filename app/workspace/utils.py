@@ -1,12 +1,10 @@
-import json
 import re
 from datetime import datetime, time
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from django.db import IntegrityError, transaction
-from django.db.models import OuterRef, Q, QuerySet, Subquery, TextField
-from django.db.models.functions import Cast
+from django.db.models import OuterRef, Q, QuerySet, Subquery
 from django.utils.dateparse import parse_date, parse_datetime
 from ninja.errors import HttpError
 
@@ -2096,11 +2094,9 @@ def query_records(user, data: dict[str, Any]) -> dict[str, Any]:
             record__database__in=databases,
             text_value__icontains=keyword,
         ).values("record_id")
-        block_ids = (
-            Block.objects.annotate(_body=Cast("content", TextField()))
-            .filter(_body_keyword_query(keyword), record__database__in=databases)
-            .values("record_id")
-        )
+        block_ids = Block.objects.filter(
+            plain_text__icontains=keyword, record__database__in=databases
+        ).values("record_id")
         qs = qs.filter(
             Q(title__icontains=keyword) | Q(id__in=value_ids) | Q(id__in=block_ids)
         )
@@ -2470,14 +2466,6 @@ def duplicate_record(user, record_id: int, source: str) -> dict[str, Any]:
     return serialize_record(record, include_blocks=True)
 
 
-def _body_keyword_query(keyword: str) -> Q:
-    query = Q(_body__icontains=keyword)
-    escaped = json.dumps(keyword)[1:-1]
-    if escaped != keyword:
-        query |= Q(_body__icontains=escaped)
-    return query
-
-
 def _page_window(page: int, page_size: int) -> tuple[int, int]:
     if page < 1 or page_size < 1 or page_size > MAX_PAGE_SIZE:
         raise HttpError(400, "페이지 값이 올바르지 않습니다.")
@@ -2497,25 +2485,19 @@ def search_workspace(user, data: dict[str, Any]) -> dict[str, Any]:
         record__database__in=databases,
         text_value__icontains=keyword,
     ).values("record_id")
-    block_ids = (
-        Block.objects.annotate(_body=Cast("content", TextField()))
-        .filter(_body_keyword_query(keyword), record__database__in=databases)
-        .values("record_id")
-    )
+    block_ids = Block.objects.filter(
+        plain_text__icontains=keyword, record__database__in=databases
+    ).values("record_id")
     records = records.filter(
         Q(title__icontains=keyword) | Q(id__in=value_ids) | Q(id__in=block_ids)
     ).order_by("-updated_at", "-id")
     from workspace.models import Page
 
-    page_block_ids = (
-        Block.objects.annotate(_body=Cast("content", TextField()))
-        .filter(
-            _body_keyword_query(keyword),
-            page__workspace_id=workspace_id,
-            page__kind=Page.Kind.DOCUMENT,
-        )
-        .values("page_id")
-    )
+    page_block_ids = Block.objects.filter(
+        plain_text__icontains=keyword,
+        page__workspace_id=workspace_id,
+        page__kind=Page.Kind.DOCUMENT,
+    ).values("page_id")
     documents = Page.objects.filter(workspace_id=workspace_id, kind=Page.Kind.DOCUMENT).filter(
         Q(name__icontains=keyword) | Q(id__in=page_block_ids)
     ).order_by("-updated_at", "-id")

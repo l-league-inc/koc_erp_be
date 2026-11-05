@@ -13,7 +13,7 @@ audience: frontend
 
 1. 문서를 열면 `wss://{API호스트}/ws/workspace/{workspace_id}/collab/{target}/{id}/`에 연결합니다. `target`은 레코드면 `record`, 문서 페이지면 `page`입니다.
 2. 인증은 워크스페이스 소켓과 같습니다. 쿠키 `access`만 보고, `Authorization`은 보지 않습니다.
-3. 연결이 되면 `sync`로 블록 목록이 오고, 이어서 `presence`로 방에 있는 사람이 옵니다.
+3. 연결이 되면 `sync`로 블록 목록과 `seq`가 오고, 이어서 `presence`로 방에 있는 사람이 옵니다. 이미 알고 있는 번호가 있으면 주소에 `?since={seq}`를 붙입니다.
 4. 선택 영역이 바뀌면 `awareness`를 보냅니다. 다른 사람의 커서는 `awareness`로 옵니다.
 5. 블록을 저장하면 REST를 써도 되고, 이 소켓으로 `op`를 보내도 됩니다. 커밋되면 방 전체에 `collab`이 옵니다.
 6. 20초마다 `ping`을 보냅니다. 45초 동안 메시지가 없는 접속은 목록에서 빠집니다.
@@ -26,8 +26,30 @@ audience: frontend
 `sync`는 연결한 소켓에만 옵니다. 블록은 `position`, `id` 순의 평탄 목록입니다.
 
 ```json
-{"type": "sync", "target": "record", "target_id": 12, "blocks": []}
+{"type": "sync", "target": "record", "target_id": 12, "seq": 4, "blocks": []}
 ```
+
+`since`가 현재 `seq`와 같으면 블록 없이 `catchup`만 옵니다. 그 사이 변경이 빠짐없이 있고 `reload`가 없으면 그 이벤트만 옵니다. 로그가 끊겼거나 `reload`가 있으면 위 `sync`로 블록 전체를 받습니다. `since`가 없으면 항상 `sync`입니다.
+
+```json
+{
+  "type": "catchup",
+  "target": "record",
+  "target_id": 12,
+  "seq": 5,
+  "events": [
+    {
+      "seq": 5,
+      "action": "updated",
+      "actor_id": 3,
+      "block_id": 9,
+      "block": {"id": 9, "type": "paragraph", "content": {"text": "고침"}}
+    }
+  ]
+}
+```
+
+`collab`에도 같은 `seq`가 있습니다. 받은 번호의 다음만 화면에 반영하고, 번호가 건너뛰면 주소를 `since`와 함께 다시 연결합니다.
 
 `presence`는 방 전체 목록입니다. 같은 사용자의 탭이 둘이면 항목이 둘입니다.
 
@@ -138,7 +160,8 @@ audience: frontend
 ## 구현 체크리스트
 
 - 편집 화면은 문서방 소켓을 연다. 워크스페이스 소켓의 `block` 이벤트와 문서방 `collab`이 같은 저장에서 둘 다 올 수 있다. 문서방을 쓰는 화면은 `collab`만 반영한다.
-- `sync`의 블록으로 본문을 그린다. 제목, 속성, 아이콘은 기존 GET을 쓴다.
+- `sync`의 블록으로 본문을 그린다. 제목, 속성, 아이콘은 기존 GET을 쓴다. `seq`를 기억했다가 다시 연결할 때 `since`로 붙인다.
+- `catchup`은 `events`만 반영한다. `sync`가 오면 본문 전체를 다시 그린다.
 - `created`와 `updated`는 `block`으로 그 칸만 바꾼다. `deleted`는 그 id와 자식을 뺀다. `reload`는 레코드 상세를 다시 조회한다.
 - 방금 보낸 `op`의 `collab`이 자기 `actor_id`로 다시 오면, 이미 화면에 반영했다면 건너뛴다. 다른 탭은 건너뛰지 않는다.
 - 커서 이동마다 `awareness`를 보내고, 20초마다 `ping`을 보낸다.
@@ -149,6 +172,6 @@ audience: frontend
 ## 비범위
 
 - AppFlowy `/ws/v2` 바이너리 메시지, Yrs 상태, 글자 단위 병합
-- 끊긴 동안의 조작을 이어 주는 것
+- 끊긴 동안 클라이언트에만 있던 조작을 서버가 이어 받는 것. 서버에 커밋된 변경은 `since`로 받습니다
 - 워크스페이스 멤버가 아닌 게스트 편집
 - 서버가 북마크 URL을 열어 제목과 설명을 채우는 것

@@ -29,6 +29,7 @@ from workspace.inbound import (
 )
 from workspace.outbound import (
     ActivityResponseSchema,
+    BlockCommentResponseSchema,
     BlockFileDownloadResponseSchema,
     BlockFileUploadResponseSchema,
     BlockResponseSchema,
@@ -49,6 +50,12 @@ from workspace.outbound import (
     ViewResponseSchema,
     WorkspaceMemberResponseSchema,
     WorkspaceResponseSchema,
+)
+from workspace.comments import (
+    create_block_comment,
+    delete_block_comment,
+    list_block_comments,
+    set_block_comment_resolved,
 )
 from workspace.files import create_block_file_download, create_block_file_upload
 from workspace.revisions import (
@@ -491,6 +498,63 @@ async def update_block_api(request, block_id: int, payload: BlockUpdateSchema):
 )
 async def delete_block_api(request, block_id: int):
     await sync_to_async(delete_block)(request.auth, block_id, activity_source(request))
+    return 204, None
+
+
+@router.get(
+    "/block/{block_id}/comment",
+    summary="[C] 블록 댓글 목록",
+    description="블록에 달린 댓글과 한 단계 답글을 조회합니다.",
+    response=list[BlockCommentResponseSchema],
+    auth=jwt_auth,
+)
+async def list_block_comment_api(request, block_id: int):
+    return await sync_to_async(list_block_comments)(request.auth, block_id)
+
+
+@router.post(
+    "/block/{block_id}/comment",
+    summary="[C] 블록 댓글 작성",
+    description="블록에 댓글을 답니다. parent_id가 있으면 그 댓글의 답글입니다. 답글의 답글은 400입니다.",
+    response={201: BlockCommentResponseSchema},
+    auth=jwt_auth,
+)
+async def create_block_comment_api(request, block_id: int, payload: CommentCreateSchema):
+    comment = await sync_to_async(create_block_comment)(request.auth, block_id, _dump(payload))
+    return 201, comment
+
+
+@router.post(
+    "/block-comment/{comment_id}/resolve",
+    summary="[C] 블록 댓글 해결",
+    description="루트 댓글을 해결로 표시합니다. 작성자이거나 관리자만 가능합니다.",
+    response=BlockCommentResponseSchema,
+    auth=jwt_auth,
+)
+async def resolve_block_comment_api(request, comment_id: int):
+    return await sync_to_async(set_block_comment_resolved)(request.auth, comment_id, True)
+
+
+@router.post(
+    "/block-comment/{comment_id}/unresolve",
+    summary="[C] 블록 댓글 해결 해제",
+    description="루트 댓글의 해결 표시를 지웁니다. 작성자이거나 관리자만 가능합니다.",
+    response=BlockCommentResponseSchema,
+    auth=jwt_auth,
+)
+async def unresolve_block_comment_api(request, comment_id: int):
+    return await sync_to_async(set_block_comment_resolved)(request.auth, comment_id, False)
+
+
+@router.delete(
+    "/block-comment/{comment_id}",
+    summary="[C] 블록 댓글 삭제",
+    description="블록 댓글을 소프트 삭제합니다. 작성자이거나 관리자만 가능합니다.",
+    response={204: None},
+    auth=jwt_auth,
+)
+async def delete_block_comment_api(request, comment_id: int):
+    await sync_to_async(delete_block_comment)(request.auth, comment_id)
     return 204, None
 
 

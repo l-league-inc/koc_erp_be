@@ -238,3 +238,75 @@ class CollabSocketTests(TransactionTestCase):
         pong = await member.receive_json_from()
         self.assertEqual(pong["type"], "pong")
         await member.disconnect()
+
+    def _collab_since(self, user, since: int):
+        communicator = WebsocketCommunicator(
+            CollabConsumer.as_asgi(),
+            f"/ws/workspace/{self.workspace.id}/collab/record/{self.record['id']}/?since={since}",
+        )
+        communicator.scope["user"] = user
+        communicator.scope["query_string"] = f"since={since}".encode()
+        communicator.scope["url_route"] = {
+            "kwargs": {
+                "workspace_id": self.workspace.id,
+                "target": "record",
+                "target_id": self.record["id"],
+            }
+        }
+        return communicator
+
+    async def test_since_replays_missing_events_or_full_sync(self):
+        from workspace.models import CollabEvent
+        from workspace.utils import update_record
+
+        await sync_to_async(create_block)(
+            self.user,
+            self.record["id"],
+            {"type": "paragraph", "content": {"text": "첫 문단"}, "position": 0},
+            "user",
+        )
+        communicator = self._collab_since(self.user, 0)
+        connected, _subprotocol = await communicator.connect()
+        self.assertTrue(connected)
+        catchup = await communicator.receive_json_from()
+        self.assertEqual(catchup["type"], "catchup")
+        self.assertEqual(catchup["seq"], 1)
+        self.assertEqual(len(catchup["events"]), 1)
+        self.assertEqual(catchup["events"][0]["action"], "created")
+        self.assertEqual(catchup["events"][0]["block"]["content"]["text"], "첫 문단")
+        await communicator.receive_json_from()
+        await communicator.disconnect()
+
+        current = self._collab_since(self.user, 1)
+        connected, _subprotocol = await current.connect()
+        self.assertTrue(connected)
+        empty = await current.receive_json_from()
+        self.assertEqual(empty["type"], "catchup")
+        self.assertEqual(empty["events"], [])
+        await current.receive_json_from()
+        await current.disconnect()
+
+        await sync_to_async(update_record)(
+            self.user,
+            self.record["id"],
+            {"blocks": [{"type": "paragraph", "content": {"text": "통째로"}, "position": 0}]},
+            "user",
+        )
+        reloaded = self._collab_since(self.user, 1)
+        connected, _subprotocol = await reloaded.connect()
+        self.assertTrue(connected)
+        full = await reloaded.receive_json_from()
+        self.assertEqual(full["type"], "sync")
+        self.assertEqual(full["blocks"][0]["content"]["text"], "통째로")
+        await reloaded.receive_json_from()
+        await reloaded.disconnect()
+
+        await sync_to_async(CollabEvent.objects.filter(record_id=self.record["id"]).delete)()
+        gap = self._collab_since(self.other, 0)
+        connected, _subprotocol = await gap.connect()
+        self.assertTrue(connected)
+        resync = await gap.receive_json_from()
+        self.assertEqual(resync["type"], "sync")
+        self.assertGreater(resync["seq"], 0)
+        await gap.receive_json_from()
+        await gap.disconnect()

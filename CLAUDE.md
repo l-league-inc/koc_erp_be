@@ -43,3 +43,4 @@ applyTo: "**"
 | [agent_frontend.md](../docs/agent_frontend.md) | 앱 안 업무 대화, 스킬, 초안 확정 |
 | [workbot_frontend.md](../docs/workbot_frontend.md) | 워크봇 저장, 실행, 통계 |
 | [document_frontend.md](../docs/document_frontend.md) | 회사 문서함, 공유·개인 폴더, 색인, 다운로드·메일 이력 |
+| [voice_frontend.md](../docs/voice_frontend.md) | 음성 등록, 비공개 S3 presigned 업로드·재생 |

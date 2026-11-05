@@ -29,3 +29,33 @@ def publish_workspace_event(
         )
 
     transaction.on_commit(_send)
+
+
+def publish_collab_event(
+    target: str,
+    target_id: int,
+    action: str,
+    actor_id: int | None,
+    block_id: int | None,
+    block: dict | None,
+) -> None:
+    """문서방에 커밋된 블록 변경을 보냅니다. 글자 단위 병합은 하지 않습니다."""
+
+    payload = {
+        "type": "collab",
+        "action": action,
+        "actor_id": actor_id,
+        "block_id": block_id,
+        "block": block,
+    }
+
+    def _send() -> None:
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return
+        async_to_sync(channel_layer.group_send)(
+            f"collab_{target}_{target_id}",
+            {"type": "collab.message", "sender": "", "payload": payload},
+        )
+
+    transaction.on_commit(_send)

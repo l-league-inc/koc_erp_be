@@ -358,6 +358,13 @@ class Block(CommonModel):
         CALLOUT = ("callout", "콜아웃")
         CODE = ("code", "코드")
         IMAGE = ("image", "이미지")
+        SIMPLE_TABLE = ("simple_table", "표")
+        SIMPLE_TABLE_ROW = ("simple_table_row", "표 행")
+        SIMPLE_TABLE_CELL = ("simple_table_cell", "표 칸")
+        SIMPLE_COLUMNS = ("simple_columns", "다단")
+        SIMPLE_COLUMN = ("simple_column", "단")
+        MATH_EQUATION = ("math_equation", "수식")
+        LINK_PREVIEW = ("link_preview", "북마크")
 
     record = models.ForeignKey(
         Record,

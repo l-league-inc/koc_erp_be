@@ -242,11 +242,21 @@ class WorkspaceApiTests(TestCase):
         self.assertEqual(created.status_code, 201, created.json())
         self.assertEqual(created.json()["icon"], "file")
         self.assertTrue(created.json()["blocks"][0]["content"]["rich_text"][0]["annotations"]["bold"])
-        rejected = await self.client.post(
+        underlined = await self.client.post(
             f"/record/{created.json()['id']}/block",
             json={
                 "type": "paragraph",
                 "content": {"rich_text": [{"text": "밑줄", "annotations": {"underline": True}}]},
+            },
+            headers=headers,
+        )
+        self.assertEqual(underlined.status_code, 201, underlined.json())
+        self.assertTrue(underlined.json()["content"]["rich_text"][0]["annotations"]["underline"])
+        rejected = await self.client.post(
+            f"/record/{created.json()['id']}/block",
+            json={
+                "type": "paragraph",
+                "content": {"rich_text": [{"text": "없음", "annotations": {"glow": True}}]},
             },
             headers=headers,
         )

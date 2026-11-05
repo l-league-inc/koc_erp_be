@@ -5,7 +5,7 @@ audience: frontend
 
 # 워크스페이스 변경 알림
 
-워크스페이스를 다른 화면과 같이 볼 때 쓰는 WebSocket입니다. 저장은 기존 REST이고, 이 소켓은 커밋된 뒤에 「무엇이 바뀌었는지」만 알립니다. 글자 단위 동시 편집이나 커서 위치는 오지 않습니다. 데이터 계약은 [workspace_frontend.md](workspace_frontend.md), 페이지 트리는 [workspace_page_frontend.md](workspace_page_frontend.md)입니다.
+워크스페이스를 다른 화면과 같이 볼 때 쓰는 WebSocket입니다. 저장은 기존 REST이고, 이 소켓은 커밋된 뒤에 「무엇이 바뀌었는지」만 알립니다. 블록 내용과 커서는 오지 않습니다. 열린 문서의 블록과 커서는 [workspace_collab_frontend.md](workspace_collab_frontend.md)입니다. 데이터 계약은 [workspace_frontend.md](workspace_frontend.md), 페이지 트리는 [workspace_page_frontend.md](workspace_page_frontend.md)입니다.
 
 ## 유저 플로우
 
@@ -84,7 +84,7 @@ audience: frontend
 
 ## 비범위
 
-- AppFlowy `/ws/v2` 프로토콜, CRDT, 커서, 선택 영역, 타이핑 중인 사용자
+- AppFlowy `/ws/v2` 바이너리 프로토콜과 글자 단위 CRDT. 문서방 JSON은 [workspace_collab_frontend.md](workspace_collab_frontend.md)입니다
 - 서버가 놓친 이벤트를 이어서 보내 주는 것
 - 클라이언트가 소켓으로 저장하거나 구독 대상을 고르는 것
 - 워크스페이스 멤버 변경, 즐겨찾기, 워크스페이스 이름 수정의 알림

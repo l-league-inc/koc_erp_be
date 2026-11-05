@@ -404,6 +404,8 @@ def create_page_block(user, page_id: int, data: dict[str, Any]) -> dict[str, Any
     from workspace.utils import (
         _block_parent_for_page,
         _validate_block_type,
+        assert_block_shape,
+        emit_block_collab,
         serialize_block,
         validate_block_content,
     )
@@ -413,14 +415,17 @@ def create_page_block(user, page_id: int, data: dict[str, Any]) -> dict[str, Any
         raise HttpError(400, "문서 페이지에만 블록을 추가할 수 있습니다.")
     block_type = _validate_block_type(str(data.get("type") or ""))
     content = validate_block_content(block_type, data.get("content") or {}, page.workspace_id)
+    parent = _block_parent_for_page(user, page, data.get("parent_id"))
+    assert_block_shape(block_type, None if parent is None else parent.type)
     block = Block.objects.create(
         page=page,
-        parent=_block_parent_for_page(user, page, data.get("parent_id")),
+        parent=parent,
         type=block_type,
         content=content,
         position=int(data.get("position") or 0),
     )
     publish_workspace_event(page.workspace_id, "block", "created", block.id, user.id)
+    emit_block_collab(block, "created", user.id)
     return serialize_block(block)
 
 

@@ -225,7 +225,7 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 
 관계 `config`에 `two_way: true`를 넣으면 대상 데이터베이스에 반대 속성이 생기고 `synced_property_id`로 서로 묶입니다. 값을 저장하면 반대 링크도 갱신됩니다. `two_way`가 없는 기존 관계는 한 방향입니다.
 
-기본 블록 타입은 `paragraph`, `heading_1`, `heading_2`, `heading_3`, `bulleted_list`, `numbered_list`, `to_do`, `quote`, `divider`입니다. `content.text` 문자열을 그대로 쓸 수 있습니다. 서식과 `toggle`, `callout`, `code`, `image`는 페이지 문서에 있습니다.
+기본 블록 타입은 `paragraph`, `heading_1`, `heading_2`, `heading_3`, `bulleted_list`, `numbered_list`, `to_do`, `quote`, `divider`입니다. `content.text` 문자열을 그대로 쓸 수 있습니다. 서식, `toggle`, `callout`, `code`, `image`, 본문 표, 다단, 수식, 북마크는 [workspace_page_frontend.md](workspace_page_frontend.md)에 있습니다. 열린 문서의 실시간 반영은 [workspace_collab_frontend.md](workspace_collab_frontend.md)입니다.
 
 ## 구현 체크리스트
 
@@ -244,7 +244,7 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 
 ## 비범위
 
-- Notion.com 동기화, 수식, 롤업, 버튼, 글자 단위 동시 편집
+- Notion.com 동기화, 롤업, 버튼, 글자 단위 병합
 - MCP로 삭제, 멤버 변경, 스키마 변경, 댓글, 템플릿, 휴지통. 워크스페이스 레코드 도구는 조회, 생성, 수정만 한다.
 - 화면의 자동화 워크봇. 계약은 [workbot_frontend.md](workbot_frontend.md)입니다.
 - 앱 안 업무 대화. 계약은 [agent_frontend.md](agent_frontend.md)입니다.

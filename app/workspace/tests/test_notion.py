@@ -283,3 +283,115 @@ class NotionWorkspaceTests(TestCase):
             headers=self.headers,
         )
         self.assertEqual(listed.json()[0]["page_id"], page.json()["id"])
+
+    async def test_appflowy_blocks_formula_and_page_mention(self):
+        page = await self.client.post(
+            f"/{self.workspace.id}/page",
+            json={"kind": "document", "name": "회의록"},
+            headers=self.headers,
+        )
+        self.assertEqual(page.status_code, 201, page.json())
+        page_id = page.json()["id"]
+        sales_id = await self._sales_id()
+        created = await self.client.post(
+            f"/database/{sales_id}/record",
+            json={
+                "title": "서식 본문",
+                "blocks": [
+                    {
+                        "type": "simple_table",
+                        "content": {
+                            "column_widths": {"0": 160},
+                            "enable_header_row": True,
+                            "column_aligns": {"0": "Left"},
+                        },
+                        "children": [
+                            {
+                                "type": "simple_table_row",
+                                "children": [
+                                    {
+                                        "type": "simple_table_cell",
+                                        "children": [
+                                            {
+                                                "type": "paragraph",
+                                                "content": {
+                                                    "rich_text": [
+                                                        {"formula": "E=mc^2"},
+                                                        {
+                                                            "text": "회의록",
+                                                            "mention": {
+                                                                "type": "page",
+                                                                "page_id": page_id,
+                                                            },
+                                                        },
+                                                    ]
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {"type": "math_equation", "content": {"formula": "a^2+b^2=c^2"}},
+                    {
+                        "type": "link_preview",
+                        "content": {"url": "https://example.com", "title": "예시"},
+                    },
+                    {
+                        "type": "simple_columns",
+                        "children": [
+                            {
+                                "type": "simple_column",
+                                "content": {"ratio": 0.5},
+                                "children": [
+                                    {"type": "paragraph", "content": {"text": "왼쪽"}}
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        types = {item["type"] for item in created.json()["blocks"]}
+        self.assertEqual(
+            types,
+            {
+                "simple_table",
+                "simple_table_row",
+                "simple_table_cell",
+                "paragraph",
+                "math_equation",
+                "link_preview",
+                "simple_columns",
+                "simple_column",
+            },
+        )
+        record_id = created.json()["id"]
+        rejected = await self.client.post(
+            f"/record/{record_id}/block",
+            json={"type": "simple_table_row", "content": {}},
+            headers=self.headers,
+        )
+        self.assertEqual(rejected.status_code, 400)
+        missing_page = await self.client.post(
+            f"/record/{record_id}/block",
+            json={
+                "type": "paragraph",
+                "content": {
+                    "rich_text": [
+                        {"text": "없는 페이지", "mention": {"type": "page", "page_id": 999999}}
+                    ]
+                },
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(missing_page.status_code, 400)
+        bad_url = await self.client.post(
+            f"/record/{record_id}/block",
+            json={"type": "link_preview", "content": {"url": "ftp://example.com"}},
+            headers=self.headers,
+        )
+        self.assertEqual(bad_url.status_code, 400)

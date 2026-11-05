@@ -10,7 +10,7 @@ from django.db.models.functions import Cast
 from django.utils.dateparse import parse_date, parse_datetime
 from ninja.errors import HttpError
 
-from workspace.events import publish_workspace_event
+from workspace.events import publish_collab_event, publish_workspace_event
 from workspace.models import (
     Block,
     Database,
@@ -48,8 +48,9 @@ FILTER_GROUP_OPS = {"and", "or"}
 SYSTEM_FIELDS = {"created_at", "updated_at", "created_by", "last_edited_by"}
 SYSTEM_USER_FIELDS = {"created_by", "last_edited_by"}
 SYSTEM_DATE_FIELDS = {"created_at", "updated_at"}
-RICH_TEXT_ANNOTATIONS = {"bold", "italic", "strikethrough", "code", "color"}
-BOOL_ANNOTATIONS = {"bold", "italic", "strikethrough", "code"}
+RICH_TEXT_ANNOTATIONS = {"bold", "italic", "strikethrough", "underline", "code", "color"}
+BOOL_ANNOTATIONS = {"bold", "italic", "strikethrough", "underline", "code"}
+TABLE_ALIGNS = {"Left", "Center", "Right"}
 GROUP_PROPERTY_TYPES = {
     Property.Type.SELECT,
     Property.Type.STATUS,
@@ -275,6 +276,22 @@ def serialize_block(block: Block) -> dict[str, Any]:
         "created_at": block.created_at,
         "updated_at": block.updated_at,
     }
+
+
+def collab_block_body(block: Block) -> dict[str, Any]:
+    body = serialize_block(block)
+    for key in ("created_at", "updated_at"):
+        value = body[key]
+        if hasattr(value, "isoformat"):
+            body[key] = value.isoformat()
+    return body
+
+
+def emit_block_collab(block: Block, action: str, actor_id: int | None) -> None:
+    target = "record" if block.record_id else "page"
+    target_id = block.record_id or block.page_id
+    body = None if action == "deleted" else collab_block_body(block)
+    publish_collab_event(target, target_id, action, actor_id, block.id, body)
 
 
 def export_value(stored: PropertyValue) -> Any:
@@ -796,11 +813,90 @@ def _validate_block_type(block_type: str) -> str:
     return block_type
 
 
+def _positive_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+
+
+def _validate_string_map(content: dict, key: str, *, label: str) -> None:
+    raw = content.get(key)
+    if raw is None:
+        return
+    if not isinstance(raw, dict) or any(not isinstance(name, str) or not isinstance(item, str) for name, item in raw.items()):
+        raise HttpError(400, f"{label}은 문자열 맵이어야 합니다.")
+
+
+def _validate_align_map(content: dict, key: str) -> None:
+    raw = content.get(key)
+    if raw is None:
+        return
+    if not isinstance(raw, dict) or any(
+        not isinstance(name, str) or item not in TABLE_ALIGNS for name, item in raw.items()
+    ):
+        raise HttpError(400, "정렬은 Left, Center, Right여야 합니다.")
+
+
+def _validate_width_map(content: dict, key: str) -> None:
+    raw = content.get(key)
+    if raw is None:
+        return
+    if not isinstance(raw, dict) or any(
+        not isinstance(name, str) or not _positive_number(item) for name, item in raw.items()
+    ):
+        raise HttpError(400, "열 너비는 0보다 큰 숫자여야 합니다.")
+
+
+def assert_block_shape(block_type: str, parent_type: str | None) -> None:
+    required = {
+        Block.Type.SIMPLE_TABLE_ROW: (
+            {Block.Type.SIMPLE_TABLE},
+            "표 행은 표 블록 아래에만 둘 수 있습니다.",
+        ),
+        Block.Type.SIMPLE_TABLE_CELL: (
+            {Block.Type.SIMPLE_TABLE_ROW},
+            "표 칸은 표 행 아래에만 둘 수 있습니다.",
+        ),
+        Block.Type.SIMPLE_COLUMN: (
+            {Block.Type.SIMPLE_COLUMNS},
+            "단은 다단 블록 아래에만 둘 수 있습니다.",
+        ),
+    }
+    if block_type in required:
+        allowed, message = required[block_type]
+        if parent_type not in allowed:
+            raise HttpError(400, message)
+    limited = {
+        Block.Type.SIMPLE_TABLE: (
+            {Block.Type.SIMPLE_TABLE_ROW},
+            "표 아래에는 표 행만 둘 수 있습니다.",
+        ),
+        Block.Type.SIMPLE_TABLE_ROW: (
+            {Block.Type.SIMPLE_TABLE_CELL},
+            "표 행 아래에는 표 칸만 둘 수 있습니다.",
+        ),
+        Block.Type.SIMPLE_COLUMNS: (
+            {Block.Type.SIMPLE_COLUMN},
+            "다단 아래에는 단만 둘 수 있습니다.",
+        ),
+    }
+    if parent_type in limited:
+        allowed, message = limited[parent_type]
+        if block_type not in allowed:
+            raise HttpError(400, message)
+
+
 def _validate_rich_text(items: Any, workspace_id: int) -> None:
     if not isinstance(items, list) or not items:
         raise HttpError(400, "rich_text는 한 항목 이상이어야 합니다.")
     for item in items:
-        if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+        if not isinstance(item, dict):
+            raise HttpError(400, "rich_text 항목에는 문자열 text가 필요합니다.")
+        has_text = "text" in item
+        has_formula = "formula" in item
+        if has_formula and not isinstance(item.get("formula"), str):
+            raise HttpError(400, "인라인 수식은 문자열이어야 합니다.")
+        if has_text and not isinstance(item.get("text"), str):
+            raise HttpError(400, "rich_text 항목에는 문자열 text가 필요합니다.")
+        if not has_text and not has_formula:
             raise HttpError(400, "rich_text 항목에는 문자열 text가 필요합니다.")
         annotations = item.get("annotations")
         if annotations is not None:
@@ -840,8 +936,14 @@ def _validate_rich_text(items: Any, workspace_id: int) -> None:
                 id=record_id, database__workspace_id=workspace_id
             ).exists():
                 raise HttpError(400, "멘션할 수 없는 레코드입니다.")
+        elif mention_type == "page":
+            page_id = mention.get("page_id")
+            if isinstance(page_id, bool) or not isinstance(page_id, int):
+                raise HttpError(400, "멘션 페이지는 id여야 합니다.")
+            if not Page.objects.filter(id=page_id, workspace_id=workspace_id).exists():
+                raise HttpError(400, "멘션할 수 없는 페이지입니다.")
         else:
-            raise HttpError(400, "멘션 타입은 user 또는 record입니다.")
+            raise HttpError(400, "멘션 타입은 user, record, page입니다.")
 
 
 def _require_text_or_rich_text(content: dict, workspace_id: int) -> None:
@@ -856,6 +958,34 @@ def validate_block_content(block_type: str, content: Any, workspace_id: int) -> 
     if not isinstance(content, dict):
         raise HttpError(400, "블록 내용은 객체여야 합니다.")
     if block_type == Block.Type.DIVIDER:
+        return content
+    if block_type == Block.Type.SIMPLE_TABLE:
+        for key in ("enable_header_row", "enable_header_column"):
+            if key in content and not isinstance(content.get(key), bool):
+                raise HttpError(400, "표 머리글 설정은 true 또는 false여야 합니다.")
+        _validate_width_map(content, "column_widths")
+        _validate_string_map(content, "row_colors", label="행 색")
+        _validate_string_map(content, "column_colors", label="열 색")
+        _validate_align_map(content, "column_aligns")
+        _validate_align_map(content, "row_aligns")
+        return content
+    if block_type in {Block.Type.SIMPLE_TABLE_ROW, Block.Type.SIMPLE_TABLE_CELL, Block.Type.SIMPLE_COLUMNS}:
+        return content
+    if block_type == Block.Type.SIMPLE_COLUMN:
+        if "ratio" in content and not _positive_number(content.get("ratio")):
+            raise HttpError(400, "단 비율은 0보다 큰 숫자여야 합니다.")
+        return content
+    if block_type == Block.Type.MATH_EQUATION:
+        if "formula" in content and not isinstance(content.get("formula"), str):
+            raise HttpError(400, "수식은 문자열이어야 합니다.")
+        return content
+    if block_type == Block.Type.LINK_PREVIEW:
+        url = content.get("url")
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            raise HttpError(400, "북마크 URL은 http:// 또는 https://로 시작해야 합니다.")
+        for key in ("title", "description", "image"):
+            if key in content and content.get(key) is not None and not isinstance(content.get(key), str):
+                raise HttpError(400, "북마크 미리보기는 문자열이어야 합니다.")
         return content
     if block_type == Block.Type.IMAGE:
         url = content.get("url")
@@ -893,6 +1023,7 @@ def create_block_tree(
     workspace_id = record.database.workspace_id if record is not None else page.workspace_id
     for index, data in enumerate(blocks or []):
         block_type = _validate_block_type(str(data.get("type") or ""))
+        assert_block_shape(block_type, None if parent is None else parent.type)
         content = validate_block_content(block_type, data.get("content") or {}, workspace_id)
         created = Block.objects.create(
             record=record,
@@ -905,10 +1036,11 @@ def create_block_tree(
         create_block_tree(record, data.get("children") or [], created, page)
 
 
-def replace_blocks(record: Record, blocks: list[dict]) -> None:
+def replace_blocks(record: Record, blocks: list[dict], actor_id: int | None = None) -> None:
     for block in list(record.blocks.all()):
         block.delete()
     create_block_tree(record, blocks, None)
+    publish_collab_event("record", record.id, "reload", actor_id, None, None)
 
 
 def _snapshot(record: Record) -> dict[str, Any]:
@@ -1481,7 +1613,7 @@ def update_record(user, record_id: int, data: dict[str, Any], source: str) -> di
     if values is not None:
         apply_values(record, values)
     if data.get("blocks") is not None:
-        replace_blocks(record, data["blocks"])
+        replace_blocks(record, data["blocks"], user.id)
     if data.get("icon") is not None:
         record.icon = str(data["icon"])
     record.last_edited_by = user
@@ -1537,9 +1669,11 @@ def create_block(user, record_id: int, data: dict[str, Any], source: str) -> dic
     content = validate_block_content(
         block_type, data.get("content") or {}, record.database.workspace_id
     )
+    parent = _block_parent(user, record, data.get("parent_id"))
+    assert_block_shape(block_type, None if parent is None else parent.type)
     block = Block.objects.create(
         record=record,
-        parent=_block_parent(user, record, data.get("parent_id")),
+        parent=parent,
         type=block_type,
         content=content,
         position=data.get("position") or 0,
@@ -1550,6 +1684,7 @@ def create_block(user, record_id: int, data: dict[str, Any], source: str) -> dic
     publish_workspace_event(
         record.database.workspace_id, "block", "created", block.id, user.id
     )
+    emit_block_collab(block, "created", user.id)
     return serialize_block(block)
 
 
@@ -1568,10 +1703,16 @@ def update_block(user, block_id: int, data: dict[str, Any], source: str) -> dict
         )
     if data.get("position") is not None:
         block.position = data["position"]
+    if data.get("type") is not None and data.get("content") is None:
+        block.content = validate_block_content(
+            block.type, block.content or {}, record.database.workspace_id
+        )
     if "parent_id" in data:
         parent = _block_parent(user, record, data.get("parent_id"))
         _reject_cycle(block, parent)
         block.parent = parent
+    parent_type = None if block.parent_id is None else block.parent.type
+    assert_block_shape(block.type, parent_type)
     block.save()
     record.last_edited_by = user
     record.save(update_fields=["last_edited_by", "updated_at"])
@@ -1579,6 +1720,7 @@ def update_block(user, block_id: int, data: dict[str, Any], source: str) -> dict
     publish_workspace_event(
         record.database.workspace_id, "block", "updated", block.id, user.id
     )
+    emit_block_collab(block, "updated", user.id)
     return serialize_block(block)
 
 
@@ -1590,12 +1732,17 @@ def _update_page_block(user, block: Block, data: dict[str, Any]) -> dict[str, An
         block.content = validate_block_content(block.type, data["content"], page.workspace_id)
     if data.get("position") is not None:
         block.position = data["position"]
+    if data.get("type") is not None and data.get("content") is None:
+        block.content = validate_block_content(block.type, block.content or {}, page.workspace_id)
     if "parent_id" in data:
         parent = _block_parent_for_page(user, page, data.get("parent_id"))
         _reject_cycle(block, parent)
         block.parent = parent
+    parent_type = None if block.parent_id is None else block.parent.type
+    assert_block_shape(block.type, parent_type)
     block.save()
     publish_workspace_event(page.workspace_id, "block", "updated", block.id, user.id)
+    emit_block_collab(block, "updated", user.id)
     return serialize_block(block)
 
 
@@ -1611,6 +1758,7 @@ def delete_block(user, block_id: int, source: str) -> None:
                 _walk(child)
             current.delete()
 
+        emit_block_collab(block, "deleted", user.id)
         _walk(block)
         publish_workspace_event(page.workspace_id, "block", "deleted", deleted_id, user.id)
         return
@@ -1622,6 +1770,7 @@ def delete_block(user, block_id: int, source: str) -> None:
             _walk(child)
         current.delete()
 
+    emit_block_collab(block, "deleted", user.id)
     _walk(block)
     record.last_edited_by = user
     record.save(update_fields=["last_edited_by", "updated_at"])
@@ -2096,16 +2245,17 @@ def _clean_template_payload(database: Database, data: dict[str, Any], *, partial
     return cleaned
 
 
-def _validate_block_tree(blocks: list, workspace_id: int) -> None:
+def _validate_block_tree(blocks: list, workspace_id: int, parent_type: str | None = None) -> None:
     for data in blocks:
         if not isinstance(data, dict):
             raise HttpError(400, "블록 내용은 객체여야 합니다.")
         block_type = _validate_block_type(str(data.get("type") or ""))
+        assert_block_shape(block_type, parent_type)
         validate_block_content(block_type, data.get("content") or {}, workspace_id)
         children = data.get("children") or []
         if not isinstance(children, list):
             raise HttpError(400, "하위 블록은 목록이어야 합니다.")
-        _validate_block_tree(children, workspace_id)
+        _validate_block_tree(children, workspace_id, block_type)
 
 
 def list_templates(user, database_id: int) -> list[dict[str, Any]]:

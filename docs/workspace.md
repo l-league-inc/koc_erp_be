@@ -15,15 +15,15 @@ KOC 워크스페이스의 데이터 원본은 Django입니다. Notion.com과 동
 | `Record` | 행이자 페이지. `title`은 제목 속성과 같이 저장되고 `icon`은 페이지 아이콘 |
 | `PropertyValue` | 타입별 값. `(record, property)`는 삭제되지 않은 행만 유니크 |
 | `RelationLink` | relation 속성 연결 |
-| `Block` | 페이지 본문. 기본 블록과 `toggle`, `callout`, `code`, `image` |
+| `Block` | 페이지 본문. 기본 블록과 `toggle`, `callout`, `code`, `image`, `simple_table`, `simple_columns`, `math_equation`, `link_preview` |
 | `View` | 표/보드/목록/캘린더/갤러리와 필터. 보드·캘린더·갤러리는 `config`로 기준 속성을 검사 |
 | `RecordActivity` | 생성·수정 스냅샷. `source`는 `user`, `mcp`, `agent`. 조회는 `GET /record/{id}/activity` |
 | `RecordComment` | 레코드 댓글. 답글은 한 단계 |
 | `DatabaseTemplate` | 새 레코드에 복사할 제목, 값, 블록 |
 
-수식, 롤업, 버튼, Notion 동기화, 글자 단위 동시 편집은 없습니다.
+롤업, 버튼, Notion 동기화, 글자 단위 병합은 없습니다. 수식과 북마크, 본문 표, 다단은 블록으로 저장합니다. 같은 문서를 연 멤버에게는 블록 변경과 커서를 알립니다.
 
-저장은 REST입니다. 멤버 화면에는 `ws/workspace/{workspace_id}/`로 변경 사실만 알립니다. 프론트 계약은 [workspace_realtime_frontend.md](workspace_realtime_frontend.md)입니다.
+저장은 REST이거나 문서방 소켓의 `op`입니다. 멤버 화면에는 `ws/workspace/{workspace_id}/`로 변경 사실만 알립니다. 열린 문서의 블록과 커서는 `ws/workspace/{workspace_id}/collab/{record|page}/{id}/`입니다. 프론트 계약은 [workspace_realtime_frontend.md](workspace_realtime_frontend.md), [workspace_collab_frontend.md](workspace_collab_frontend.md)입니다.
 
 ## 조회
 

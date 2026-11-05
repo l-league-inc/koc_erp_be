@@ -54,7 +54,14 @@ audience: frontend
 }
 ```
 
-`annotations`에 없는 키는 400입니다. 허용 키는 `bold`, `italic`, `strikethrough`, `code`, `color`입니다. 앞의 네 개는 boolean이고 `color`는 문자열입니다. `href`는 `http://` 또는 `https://`이거나 `null`입니다. 멘션 `user`는 같은 워크스페이스 멤버, `record`는 같은 워크스페이스의 살아있는 레코드여야 합니다.
+`annotations`에 없는 키는 400입니다. 허용 키는 `bold`, `italic`, `strikethrough`, `underline`, `code`, `color`입니다. `color`를 뺀 값은 boolean이고 `color`는 문자열입니다. `href`는 `http://` 또는 `https://`이거나 `null`입니다. 멘션 `user`는 같은 워크스페이스 멤버, `record`는 같은 워크스페이스의 살아있는 레코드, `page`는 같은 워크스페이스의 살아있는 페이지여야 합니다.
+
+인라인 수식은 AppFlowy의 `formula`와 같습니다. `text` 없이 `formula`만 있는 항목도 됩니다. 둘 다 없으면 400입니다.
+
+```json
+{"text": "회의록", "mention": {"type": "page", "page_id": 4}}
+{"formula": "E=mc^2"}
+```
 
 추가 블록:
 
@@ -66,6 +73,34 @@ audience: frontend
 | `image` | `url` 필수. 캡션은 `text` 또는 `rich_text` |
 | `to_do` | `checked` boolean. 본문은 `text` 또는 `rich_text` |
 | `divider` | `{}` |
+| `simple_table` | 아래 표 설정. 자식은 `simple_table_row`만 |
+| `simple_table_row` | `{}`. 부모는 `simple_table`. 자식은 `simple_table_cell`만 |
+| `simple_table_cell` | `{}`. 부모는 `simple_table_row`. 칸 안의 문단은 자식 블록 |
+| `simple_columns` | `{}`. 자식은 `simple_column`만 |
+| `simple_column` | `ratio`는 0보다 큰 숫자. 부모는 `simple_columns`. 그 안의 블록은 자식 |
+| `math_equation` | `formula` 문자열. 비어 있어도 됩니다 |
+| `link_preview` | `url` 필수. `title`, `description`, `image`는 문자열 |
+
+표와 다단의 부모 규칙에 맞지 않으면 400입니다. 표 설정은 AppFlowy `SimpleTableData`와 같습니다.
+
+```json
+{
+  "type": "simple_table",
+  "content": {
+    "column_widths": {"0": 160, "1": 160},
+    "enable_header_row": true,
+    "enable_header_column": false,
+    "column_aligns": {"0": "Left"},
+    "row_aligns": {"0": "Center"},
+    "column_colors": {"0": "gray"},
+    "row_colors": {"0": "yellow"}
+  }
+}
+```
+
+`column_aligns`와 `row_aligns`의 값은 `Left`, `Center`, `Right`입니다. 열 너비는 0보다 큰 숫자입니다.
+
+북마크는 AppFlowy `link_preview`입니다. 서버는 URL의 제목을 긁지 않습니다. 미리보기를 보여 주려면 클라이언트가 `title`, `description`, `image`를 넣어 저장합니다.
 
 이미지와 파일 바이트는 워크스페이스에 올리지 않습니다. `POST /api/v1/aws/upload`에 `{file_name}`을 보내 받은 `uploadURL`로 PUT한 뒤, 응답 `imageURL`을 블록 `url`이나 파일 속성의 `url`에 넣습니다.
 
@@ -177,6 +212,7 @@ audience: frontend
 - 행 삭제 후 휴지통에서 복원하면 상세를 다시 연다.
 - 사이드바 트리는 `parent_id`로 만들고, 데이터베이스 페이지를 폴더로 옮기면 `section_slug`도 그 폴더를 따른다.
 - `workspace_changed`를 받으면 본문 없이 해당 `entity`를 다시 조회한다.
+- 편집 중인 문서는 [workspace_collab_frontend.md](workspace_collab_frontend.md)의 `sync`와 `collab`로 블록을 맞춘다.
 - 숨긴 열은 `config.hidden_properties`를 따른다. 제목은 숨기지 않는다.
 
 ## 페이지 트리
@@ -203,7 +239,8 @@ audience: frontend
 
 ## 비범위
 
-- 수식, 롤업, 버튼, Notion.com 동기화, 실시간 커서, 글자 단위 동시 편집
+- 롤업, 버튼, Notion.com 동기화
+- 글자 단위 병합. 블록 저장과 커서는 [workspace_collab_frontend.md](workspace_collab_frontend.md)입니다
 - 데이터베이스마다 다른 권한. 멤버는 페이지를 읽고 쓸 수 있다.
 - 댓글 서식과 멘션. 댓글 본문은 일반 텍스트다.
 - 블록 단위 휴지통

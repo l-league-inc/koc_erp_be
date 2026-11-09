@@ -82,6 +82,7 @@ class ViewUpdateSchema(Schema):
 
 
 class BlockWriteSchema(Schema):
+    id: Optional[int] = None
     type: str
     content: dict = Field(default_factory=dict)
     position: int = 0
@@ -115,6 +116,12 @@ class RecordUpdateSchema(Schema):
     icon: Optional[str] = None
     values: Optional[dict[str, Any]] = None
     blocks: Optional[list[BlockWriteSchema]] = None
+    base_seq: Optional[int] = None
+
+
+class BlockSyncSchema(Schema):
+    blocks: list[BlockWriteSchema] = Field(default_factory=list)
+    base_seq: Optional[int] = None
 
 
 class CommentCreateSchema(Schema):

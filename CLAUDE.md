@@ -41,6 +41,7 @@ applyTo: "**"
 | [workspace_page_frontend.md](../docs/workspace_page_frontend.md) | 페이지 아이콘, 서식 블록, 댓글, 활동, 보기, 템플릿, 휴지통 |
 | [workspace_realtime_frontend.md](../docs/workspace_realtime_frontend.md) | 워크스페이스 WebSocket 변경 알림 |
 | [workspace_collab_frontend.md](../docs/workspace_collab_frontend.md) | 문서방 블록 동기화와 커서 |
+| [workspace_block_sync_frontend.md](../docs/workspace_block_sync_frontend.md) | 문서·레코드 본문 통째 저장, `base_seq` 충돌, 개정 간격 |
 | [agent_frontend.md](../docs/agent_frontend.md) | 앱 안 업무 대화, 스킬, 초안 확정 |
 | [workbot_frontend.md](../docs/workbot_frontend.md) | 워크봇 저장, 실행, 통계 |
 | [document_frontend.md](../docs/document_frontend.md) | 회사 문서함, 공유·개인 폴더, 색인, 다운로드·메일 이력 |

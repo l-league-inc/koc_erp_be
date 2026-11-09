@@ -217,7 +217,7 @@ audience: frontend
 
 ## 본문 개정
 
-블록, 레코드 제목, 아이콘, 값을 바꾸기 직전 본문을 최근 50건 남깁니다. 내용이 같으면 개정은 없습니다. 목록에는 본문이 없고, 한 건 조회에만 `body`가 있습니다.
+블록, 레코드 제목, 아이콘, 값을 바꾸기 직전 본문을 최근 50건 남깁니다. 내용이 같으면 개정은 없습니다. 같은 사용자가 5분 안에 다시 고치면 새 개정을 만들지 않고, 그 편집을 시작하기 직전 본문이 개정으로 남아 있습니다. 다른 사용자가 고치거나 5분이 지나면 새 개정이 생기고, 복원은 항상 개정을 남깁니다. 목록에는 본문이 없고, 한 건 조회에만 `body`가 있습니다.
 
 - `GET /record/{record_id}/revision`, `GET /page/{page_id}/revision`: `id`, `actor_id`, `actor_name`, `created_at`
 - `GET .../revision/{revision_id}`: 위에 `body`를 더합니다. 레코드 `body`는 `title`, `icon`, `values`, `blocks`입니다. 문서 페이지 `body`는 `blocks`입니다.
@@ -260,6 +260,7 @@ audience: frontend
 - `access`가 `admin`이면 멤버에게 본문 편집을 숨긴다. 조회와 댓글은 남긴다.
 - 사이드바 트리는 `parent_id`로 만들고, 데이터베이스 페이지를 폴더로 옮기면 `section_slug`도 그 폴더를 따른다.
 - `workspace_changed`를 받으면 본문 없이 해당 `entity`를 다시 조회한다.
+- 본문은 줄마다 저장하지 않고 [workspace_block_sync_frontend.md](workspace_block_sync_frontend.md)의 통째 저장으로 보낸다.
 - 편집 중인 문서는 [workspace_collab_frontend.md](workspace_collab_frontend.md)의 `sync`와 `collab`로 블록을 맞춘다.
 - 숨긴 열은 `config.hidden_properties`를 따른다. 제목은 숨기지 않는다.
 
@@ -271,7 +272,7 @@ audience: frontend
 
 `POST /page/{page_id}/move`는 `{parent_id, position}`입니다. `parent_id`가 비면 루트입니다. 자기 자손 아래는 400입니다. 데이터베이스 페이지의 직계 부모가 폴더이면 `Database.section`과 `section_slug`가 그 폴더를 따릅니다.
 
-문서 블록은 `GET|POST /page/{page_id}/block`이고 모양은 레코드 블록과 같습니다. `POST /page/{page_id}/duplicate`는 같은 부모 아래에 블록을 복사합니다.
+문서 블록은 `GET|POST /page/{page_id}/block`이고 모양은 레코드 블록과 같습니다. 본문을 트리째 저장하는 `PUT /page/{page_id}/block`은 [workspace_block_sync_frontend.md](workspace_block_sync_frontend.md)입니다. `POST /page/{page_id}/duplicate`는 같은 부모 아래에 블록을 복사합니다.
 
 `POST /page/{page_id}/favorite`, `DELETE /page/{page_id}/favorite`, `GET /{workspace_id}/favorite`.
 

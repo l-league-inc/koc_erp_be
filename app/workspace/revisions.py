@@ -1,15 +1,18 @@
 """문서를 고치기 직전의 본문을 남기고 되돌립니다."""
 
+from datetime import timedelta
 from typing import Any
 
 from django.db import transaction
+from django.utils import timezone
 from ninja.errors import HttpError
 
 from workspace.access import require_content_write
-from workspace.mentions import notify_new_user_mentions
+from workspace.mentions import block_user_ids, known_user_ids, notify_new_user_mentions
 from workspace.models import Block, DocumentRevision, Page, Property, Record, RecordActivity
 
 REVISION_LIMIT = 50
+REVISION_INTERVAL = timedelta(minutes=5)
 
 
 def block_tree(blocks: list[Block]) -> list[dict[str, Any]]:
@@ -55,38 +58,65 @@ def _prune(qs) -> None:
         row.delete()
 
 
-def after_record_edit(record: Record, actor, before: dict[str, Any]) -> None:
-    after = record_body(record)
-    if before == after:
-        return
-    DocumentRevision.objects.create(record=record, actor=actor, body=before)
-    _prune(DocumentRevision.objects.filter(record=record))
-    notify_new_user_mentions(
-        before,
-        list(record.blocks.order_by("position", "id")),
-        actor,
-        workspace_id=record.database.workspace_id,
-        target="record",
-        target_id=record.id,
-        label=record.title,
-    )
+class BodyEdit:
+    """본문 한 번 고치는 동안의 개정과 멘션 알림을 맡습니다.
 
+    같은 사용자가 `REVISION_INTERVAL` 안에 다시 고치면 새 개정을 만들지 않습니다.
+    그 경우 첫 수정 직전 본문이 이미 개정에 있으므로 전체 본문을 읽지 않습니다.
+    멘션은 바뀐 블록에 사용자 멘션이 있을 때만 기존 멘션을 조회합니다.
+    """
 
-def after_page_edit(page: Page, actor, before: dict[str, Any]) -> None:
-    after = page_body(page)
-    if before == after:
-        return
-    DocumentRevision.objects.create(page=page, actor=actor, body=before)
-    _prune(DocumentRevision.objects.filter(page=page))
-    notify_new_user_mentions(
-        before,
-        list(page.blocks.order_by("position", "id")),
-        actor,
-        workspace_id=page.workspace_id,
-        target="page",
-        target_id=page.id,
-        label=page.name,
-    )
+    def __init__(self, owner: Record | Page, actor, *, force: bool = False) -> None:
+        self.owner = owner
+        self.actor = actor
+        self.known: set[int] | None = None
+        self.before = self._body() if force or self._due() else None
+
+    def _body(self) -> dict[str, Any]:
+        return record_body(self.owner) if isinstance(self.owner, Record) else page_body(self.owner)
+
+    def _revisions(self):
+        field = "record" if isinstance(self.owner, Record) else "page"
+        return DocumentRevision.objects.filter(**{field: self.owner})
+
+    def _due(self) -> bool:
+        last = self._revisions().order_by("-id").values_list("actor_id", "created_at").first()
+        if last is None:
+            return True
+        actor_id, created_at = last
+        return actor_id != self.actor.id or timezone.now() - created_at >= REVISION_INTERVAL
+
+    def track_mentions(self) -> None:
+        if self.known is None:
+            self.known = known_user_ids(self.owner.blocks)
+
+    def watch(self, content: Any) -> None:
+        """저장하기 전에 새 내용을 넘깁니다. 사용자 멘션이 있을 때만 기존 멘션을 읽습니다."""
+        if content and block_user_ids(content):
+            self.track_mentions()
+
+    def finish(self, changed: list[Block] | None = None) -> None:
+        if self.before is not None and self._body() != self.before:
+            field = "record" if isinstance(self.owner, Record) else "page"
+            DocumentRevision.objects.create(
+                **{field: self.owner}, actor=self.actor, body=self.before
+            )
+            _prune(self._revisions())
+        if self.known is None or not changed:
+            return
+        if isinstance(self.owner, Record):
+            workspace_id, target, label = self.owner.database.workspace_id, "record", self.owner.title
+        else:
+            workspace_id, target, label = self.owner.workspace_id, "page", self.owner.name
+        notify_new_user_mentions(
+            self.known,
+            changed,
+            self.actor,
+            workspace_id=workspace_id,
+            target=target,
+            target_id=self.owner.id,
+            label=label,
+        )
 
 
 def _actor_name(user) -> str:
@@ -197,7 +227,8 @@ def restore_record_revision(user, record_id: int, revision_id: int, source: str)
     record, revision = _record_revision(user, record_id, revision_id)
     require_content_write(user, database=record.database)
     activity_before = _snapshot(record)
-    before = record_body(record)
+    edit = BodyEdit(record, user, force=True)
+    edit.track_mentions()
     body = revision.body or {}
     title = str(body.get("title") or "").strip()
     if not title:
@@ -212,7 +243,7 @@ def restore_record_revision(user, record_id: int, revision_id: int, source: str)
     replace_blocks(record, body.get("blocks") or [], user.id)
     record.last_edited_by = user
     record.save(update_fields=["title", "icon", "last_edited_by", "updated_at"])
-    after_record_edit(record, user, before)
+    edit.finish(list(record.blocks.order_by("position", "id")))
     log_activity(
         record,
         user,
@@ -232,9 +263,10 @@ def restore_page_revision(user, page_id: int, revision_id: int) -> dict[str, Any
 
     page, revision = _page_revision(user, page_id, revision_id)
     require_content_write(user, page=page)
-    before = page_body(page)
+    edit = BodyEdit(page, user, force=True)
+    edit.track_mentions()
     body = revision.body or {}
     _replace_page_blocks(page, body.get("blocks") or [], user.id)
-    after_page_edit(page, user, before)
+    edit.finish(list(page.blocks.order_by("position", "id")))
     publish_workspace_event(page.workspace_id, "page", "updated", page.id, user.id)
     return serialize_page(page, include_blocks=True)

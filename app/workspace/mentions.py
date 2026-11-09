@@ -1,6 +1,6 @@
 """본문에 새로 등장한 사용자 멘션을 알림으로 보냅니다."""
 
-from typing import Any
+from typing import Any, Iterable
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -37,13 +37,21 @@ def mention_user_ids(body: dict[str, Any]) -> set[int]:
     return found
 
 
-def _block_user_ids(content: dict) -> set[int]:
+def block_user_ids(content: Any) -> set[int]:
     return mention_user_ids({"blocks": [{"content": content or {}}]})
 
 
+def known_user_ids(blocks) -> set[int]:
+    """저장돼 있는 블록들에 이미 멘션된 사용자입니다. 내용 열만 읽습니다."""
+    found: set[int] = set()
+    for content in blocks.values_list("content", flat=True):
+        found |= block_user_ids(content)
+    return found
+
+
 def notify_new_user_mentions(
-    before: dict[str, Any],
-    blocks: list[Block],
+    known: set[int],
+    blocks: Iterable[Block],
     actor,
     *,
     workspace_id: int,
@@ -51,10 +59,11 @@ def notify_new_user_mentions(
     target_id: int,
     label: str,
 ) -> None:
-    fresh = mention_user_ids(before)
+    """`known`에 없던 사용자 멘션이 `blocks`에 있으면 한 번씩 알립니다."""
+    fresh = set(known)
     pending: list[tuple[int, int]] = []
     for block in blocks:
-        for user_id in _block_user_ids(block.content or {}):
+        for user_id in block_user_ids(block.content):
             if user_id in fresh or user_id == actor.id:
                 continue
             pending.append((user_id, block.id))

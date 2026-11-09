@@ -111,6 +111,8 @@ def serialize_page(page: Page, *, include_blocks: bool = False) -> dict[str, Any
     if include_blocks:
         blocks = page.blocks.order_by("position", "id") if page.kind == Page.Kind.DOCUMENT else []
         payload["blocks"] = [serialize_block(block) for block in blocks]
+        page.refresh_from_db(fields=["collab_seq"])
+        payload["collab_seq"] = page.collab_seq
     return payload
 
 
@@ -429,17 +431,18 @@ def create_page_block(user, page_id: int, data: dict[str, Any]) -> dict[str, Any
     )
 
     from workspace.access import require_content_write
-    from workspace.revisions import after_page_edit, page_body
+    from workspace.revisions import BodyEdit
 
     page = get_page(user, page_id)
     if page.kind != Page.Kind.DOCUMENT:
         raise HttpError(400, "문서 페이지에만 블록을 추가할 수 있습니다.")
     require_content_write(user, page=page)
-    before_body = page_body(page)
+    edit = BodyEdit(page, user)
     block_type = _validate_block_type(str(data.get("type") or ""))
     content = validate_block_content(block_type, data.get("content") or {}, page.workspace_id)
     parent = _block_parent_for_page(user, page, data.get("parent_id"))
     assert_block_shape(block_type, None if parent is None else parent.type)
+    edit.watch(content)
     block = Block.objects.create(
         page=page,
         parent=parent,
@@ -449,7 +452,7 @@ def create_page_block(user, page_id: int, data: dict[str, Any]) -> dict[str, Any
     )
     publish_workspace_event(page.workspace_id, "block", "created", block.id, user.id)
     emit_block_collab(block, "created", user.id)
-    after_page_edit(page, user, before_body)
+    edit.finish([block])
     return serialize_block(block)
 
 

@@ -96,6 +96,7 @@ class RecordResponseSchema(Schema):
 
 class RecordDetailResponseSchema(RecordResponseSchema):
     blocks: list[BlockResponseSchema]
+    collab_seq: int = Field(0, description="본문 변경 번호. 블록 저장의 base_seq에 씁니다.")
 
 
 class RecordQueryResponseSchema(Schema):
@@ -203,6 +204,16 @@ class PageResponseSchema(Schema):
 
 class PageDetailResponseSchema(PageResponseSchema):
     blocks: list[BlockResponseSchema] = Field(default_factory=list)
+    collab_seq: int = Field(0, description="본문 변경 번호. 블록 저장의 base_seq에 씁니다.")
+
+
+class BlockSyncResponseSchema(Schema):
+    seq: int = Field(description="저장 뒤 본문 변경 번호. 다음 저장의 base_seq입니다.")
+    ids: list[int] = Field(
+        description="요청 트리를 위에서 아래로 훑은 순서(부모 다음에 자식)의 블록 id"
+    )
+    blocks: list[BlockResponseSchema] = Field(description="새로 만들거나 바뀐 블록")
+    deleted_ids: list[int] = Field(description="지워진 블록 id")
 
 
 class FavoriteResponseSchema(Schema):

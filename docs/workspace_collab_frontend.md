@@ -15,7 +15,7 @@ audience: frontend
 2. 인증은 워크스페이스 소켓과 같습니다. 쿠키 `access`만 보고, `Authorization`은 보지 않습니다.
 3. 연결이 되면 `sync`로 블록 목록과 `seq`가 오고, 이어서 `presence`로 방에 있는 사람이 옵니다. 이미 알고 있는 번호가 있으면 주소에 `?since={seq}`를 붙입니다.
 4. 선택 영역이 바뀌면 `awareness`를 보냅니다. 다른 사람의 커서는 `awareness`로 옵니다.
-5. 블록을 저장하면 REST를 써도 되고, 이 소켓으로 `op`를 보내도 됩니다. 커밋되면 방 전체에 `collab`이 옵니다.
+5. 블록을 저장하면 REST를 써도 되고, 이 소켓으로 `op`를 보내도 됩니다. 문서 본문을 자주 저장하는 편집 화면은 줄마다 `op`를 보내지 말고 [본문 통째 저장](workspace_block_sync_frontend.md)을 씁니다. 커밋되면 방 전체에 `collab`이 옵니다.
 6. 20초마다 `ping`을 보냅니다. 45초 동안 메시지가 없는 접속은 목록에서 빠집니다.
 7. 화면을 닫으면 소켓을 `close`합니다. 방을 나간 사람의 커서는 `presence`에서 빠집니다.
 
@@ -106,7 +106,7 @@ audience: frontend
 }
 ```
 
-`action`이 `updated`이면 `block`이 바뀐 블록입니다. `deleted`이면 `block`은 `null`이고, 그 블록의 자식도 함께 지워집니다. `reload`이면 `block_id`와 `block`이 `null`입니다. 레코드 수정 본문에 `blocks`를 넣어 본문을 통째로 바꾼 경우이므로 `GET /record/{id}`로 다시 그립니다.
+`action`이 `updated`이면 `block`이 바뀐 블록입니다. `deleted`이면 `block`은 `null`이고, 그 블록의 자식도 함께 지워집니다. `reload`이면 `block_id`와 `block`이 `null`입니다. 본문을 통째로 바꾼 경우입니다. 레코드 수정 본문에 `id` 없는 `blocks`를 넣었거나, 개정을 복원했거나, [본문 통째 저장](workspace_block_sync_frontend.md)으로 바뀐 블록이 30개를 넘은 경우입니다. 문서는 `GET /page/{id}`, 레코드는 `GET /record/{id}`로 다시 그립니다.
 
 `error`는 그 소켓의 `op`나 형식이 거절된 것입니다. 연결은 유지됩니다. `status`는 HTTP 상태와 같습니다. 데이터베이스나 문서의 `access`가 `admin`인데 멤버가 `op`를 보내면 `status`는 403입니다. 그 멤버도 `sync`, `presence`, `awareness`, `ping`은 할 수 있습니다.
 
@@ -162,6 +162,7 @@ audience: frontend
 - 편집 화면은 문서방 소켓을 연다. 워크스페이스 소켓의 `block` 이벤트와 문서방 `collab`이 같은 저장에서 둘 다 올 수 있다. 문서방을 쓰는 화면은 `collab`만 반영한다.
 - `sync`의 블록으로 본문을 그린다. 제목, 속성, 아이콘은 기존 GET을 쓴다. `seq`를 기억했다가 다시 연결할 때 `since`로 붙인다.
 - `catchup`은 `events`만 반영한다. `sync`가 오면 본문 전체를 다시 그린다.
+- 본문 통째 저장의 `base_seq`가 맞으려면 받은 `collab`의 `seq`를 화면 트리에 반영하고 그 번호를 이어 가야 한다.
 - `created`와 `updated`는 `block`으로 그 칸만 바꾼다. `deleted`는 그 id와 자식을 뺀다. `reload`는 레코드 상세를 다시 조회한다.
 - 방금 보낸 `op`의 `collab`이 자기 `actor_id`로 다시 오면, 이미 화면에 반영했다면 건너뛴다. 다른 탭은 건너뛰지 않는다.
 - 커서 이동마다 `awareness`를 보내고, 20초마다 `ping`을 보낸다.

@@ -416,6 +416,8 @@ def serialize_record(record: Record, *, include_blocks: bool = False) -> dict[st
     if include_blocks:
         blocks = record.blocks.order_by("position", "id")
         payload["blocks"] = [serialize_block(block) for block in blocks]
+        record.refresh_from_db(fields=["collab_seq"])
+        payload["collab_seq"] = record.collab_seq
     return payload
 
 
@@ -1141,6 +1143,11 @@ def _snapshot(record: Record) -> dict[str, Any]:
     }
 
 
+def _block_snapshot(record: Record) -> dict[str, Any]:
+    """블록만 고치는 동작용입니다. 제목과 속성 값은 읽지 않습니다."""
+    return {"block_count": record.blocks.count()}
+
+
 def _diff(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
     changes: dict[str, Any] = {}
     if before.get("title") != after.get("title"):
@@ -1703,12 +1710,16 @@ def create_record(user, database_id: int, data: dict[str, Any], source: str) -> 
 @transaction.atomic
 def update_record(user, record_id: int, data: dict[str, Any], source: str) -> dict[str, Any]:
     from workspace.access import require_content_write
-    from workspace.revisions import after_record_edit, record_body
+    from workspace.blocksync import lock_owner, sync_blocks
+    from workspace.revisions import BodyEdit
 
     record = get_record(user, record_id)
     require_content_write(user, database=record.database)
-    before_body = record_body(record)
+    if data.get("blocks") is not None:
+        lock_owner(record)
+    edit = BodyEdit(record, user)
     before = _snapshot(record)
+    synced = None
     values = dict(data["values"]) if data.get("values") is not None else None
     if data.get("title") is not None:
         title = str(data["title"]).strip()
@@ -1719,14 +1730,16 @@ def update_record(user, record_id: int, data: dict[str, Any], source: str) -> di
     if values is not None:
         apply_values(record, values)
     if data.get("blocks") is not None:
-        replace_blocks(record, data["blocks"], user.id)
+        synced = sync_blocks(
+            record, data["blocks"], user, edit=edit, base_seq=data.get("base_seq")
+        )
     if data.get("icon") is not None:
         record.icon = str(data["icon"])
     record.last_edited_by = user
     record.save(update_fields=["title", "last_edited_by", "updated_at"])
     after = _snapshot(record)
     log_activity(record, user, RecordActivity.Action.UPDATED, before, after, source)
-    after_record_edit(record, user, before_body)
+    edit.finish(synced.created + synced.updated if synced is not None else None)
     publish_workspace_event(
         record.database.workspace_id, "record", "updated", record.id, user.id
     )
@@ -1774,18 +1787,19 @@ def _reject_cycle(block: Block, parent: Block | None) -> None:
 @transaction.atomic
 def create_block(user, record_id: int, data: dict[str, Any], source: str) -> dict[str, Any]:
     from workspace.access import require_content_write
-    from workspace.revisions import after_record_edit, record_body
+    from workspace.revisions import BodyEdit
 
     record = get_record(user, record_id)
     require_content_write(user, database=record.database)
-    before_body = record_body(record)
-    before = _snapshot(record)
+    edit = BodyEdit(record, user)
+    before = _block_snapshot(record)
     block_type = _validate_block_type(str(data.get("type") or ""))
     content = validate_block_content(
         block_type, data.get("content") or {}, record.database.workspace_id
     )
     parent = _block_parent(user, record, data.get("parent_id"))
     assert_block_shape(block_type, None if parent is None else parent.type)
+    edit.watch(content)
     block = Block.objects.create(
         record=record,
         parent=parent,
@@ -1795,12 +1809,14 @@ def create_block(user, record_id: int, data: dict[str, Any], source: str) -> dic
     )
     record.last_edited_by = user
     record.save(update_fields=["last_edited_by", "updated_at"])
-    log_activity(record, user, RecordActivity.Action.UPDATED, before, _snapshot(record), source)
+    log_activity(
+        record, user, RecordActivity.Action.UPDATED, before, _block_snapshot(record), source
+    )
     publish_workspace_event(
         record.database.workspace_id, "block", "created", block.id, user.id
     )
     emit_block_collab(block, "created", user.id)
-    after_record_edit(record, user, before_body)
+    edit.finish([block])
     return serialize_block(block)
 
 
@@ -1810,12 +1826,12 @@ def update_block(user, block_id: int, data: dict[str, Any], source: str) -> dict
     if block.record_id is None:
         return _update_page_block(user, block, data)
     from workspace.access import require_content_write
-    from workspace.revisions import after_record_edit, record_body
+    from workspace.revisions import BodyEdit
 
     record = block.record
     require_content_write(user, database=record.database)
-    before_body = record_body(record)
-    before = _snapshot(record)
+    edit = BodyEdit(record, user)
+    before = _block_snapshot(record)
     if data.get("type") is not None:
         block.type = _validate_block_type(str(data["type"]))
     if data.get("content") is not None:
@@ -1834,25 +1850,29 @@ def update_block(user, block_id: int, data: dict[str, Any], source: str) -> dict
         block.parent = parent
     parent_type = None if block.parent_id is None else block.parent.type
     assert_block_shape(block.type, parent_type)
+    if data.get("content") is not None or data.get("type") is not None:
+        edit.watch(block.content)
     block.save()
     record.last_edited_by = user
     record.save(update_fields=["last_edited_by", "updated_at"])
-    log_activity(record, user, RecordActivity.Action.UPDATED, before, _snapshot(record), source)
+    log_activity(
+        record, user, RecordActivity.Action.UPDATED, before, _block_snapshot(record), source
+    )
     publish_workspace_event(
         record.database.workspace_id, "block", "updated", block.id, user.id
     )
     emit_block_collab(block, "updated", user.id)
-    after_record_edit(record, user, before_body)
+    edit.finish([block])
     return serialize_block(block)
 
 
 def _update_page_block(user, block: Block, data: dict[str, Any]) -> dict[str, Any]:
     from workspace.access import require_content_write
-    from workspace.revisions import after_page_edit, page_body
+    from workspace.revisions import BodyEdit
 
     page = block.page
     require_content_write(user, page=page)
-    before_body = page_body(page)
+    edit = BodyEdit(page, user)
     if data.get("type") is not None:
         block.type = _validate_block_type(str(data["type"]))
     if data.get("content") is not None:
@@ -1867,10 +1887,12 @@ def _update_page_block(user, block: Block, data: dict[str, Any]) -> dict[str, An
         block.parent = parent
     parent_type = None if block.parent_id is None else block.parent.type
     assert_block_shape(block.type, parent_type)
+    if data.get("content") is not None or data.get("type") is not None:
+        edit.watch(block.content)
     block.save()
     publish_workspace_event(page.workspace_id, "block", "updated", block.id, user.id)
     emit_block_collab(block, "updated", user.id)
-    after_page_edit(page, user, before_body)
+    edit.finish([block])
     return serialize_block(block)
 
 
@@ -1879,32 +1901,34 @@ def delete_block(user, block_id: int, source: str) -> None:
     block = get_block(user, block_id)
     if block.record_id is None:
         from workspace.access import require_content_write
-        from workspace.revisions import after_page_edit, page_body
+        from workspace.revisions import BodyEdit
 
         page = block.page
         require_content_write(user, page=page)
-        before_body = page_body(page)
+        edit = BodyEdit(page, user)
         deleted_id = block.id
 
         emit_block_collab(block, "deleted", user.id)
         soft_delete_blocks(_subtree_ids(block))
-        after_page_edit(page, user, before_body)
+        edit.finish()
         publish_workspace_event(page.workspace_id, "block", "deleted", deleted_id, user.id)
         return
     from workspace.access import require_content_write
-    from workspace.revisions import after_record_edit, record_body
+    from workspace.revisions import BodyEdit
 
     record = block.record
     require_content_write(user, database=record.database)
-    before_body = record_body(record)
-    before = _snapshot(record)
+    edit = BodyEdit(record, user)
+    before = _block_snapshot(record)
 
     emit_block_collab(block, "deleted", user.id)
     soft_delete_blocks(_subtree_ids(block))
     record.last_edited_by = user
     record.save(update_fields=["last_edited_by", "updated_at"])
-    log_activity(record, user, RecordActivity.Action.UPDATED, before, _snapshot(record), source)
-    after_record_edit(record, user, before_body)
+    log_activity(
+        record, user, RecordActivity.Action.UPDATED, before, _block_snapshot(record), source
+    )
+    edit.finish()
     publish_workspace_event(
         record.database.workspace_id, "block", "deleted", block_id, user.id
     )

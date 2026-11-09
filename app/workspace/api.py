@@ -7,6 +7,7 @@ from api.security import jwt_auth
 from workspace.inbound import (
     BlockCreateSchema,
     BlockFileUploadSchema,
+    BlockSyncSchema,
     BlockUpdateSchema,
     CommentCreateSchema,
     DatabaseCreateSchema,
@@ -33,6 +34,7 @@ from workspace.outbound import (
     BlockFileDownloadResponseSchema,
     BlockFileUploadResponseSchema,
     BlockResponseSchema,
+    BlockSyncResponseSchema,
     CommentResponseSchema,
     DatabaseDetailResponseSchema,
     DatabaseResponseSchema,
@@ -57,6 +59,7 @@ from workspace.comments import (
     list_block_comments,
     set_block_comment_resolved,
 )
+from workspace.blocksync import sync_page_blocks
 from workspace.files import create_block_file_download, create_block_file_upload
 from workspace.revisions import (
     get_page_revision,
@@ -870,6 +873,21 @@ async def list_page_block_api(request, page_id: int):
 async def create_page_block_api(request, page_id: int, payload: BlockCreateSchema):
     block = await sync_to_async(create_page_block)(request.auth, page_id, _dump(payload))
     return 201, block
+
+
+@router.put(
+    "/page/{page_id}/block",
+    summary="[C] 문서 블록 통째 저장",
+    description=(
+        "문서 본문을 트리째 보냅니다. `id`가 있는 블록은 달라진 부분만 고치고, `id`가 없으면 새로 만들며, "
+        "트리에 없는 기존 블록은 지웁니다. 순서는 배열 순서이고 `position`은 무시합니다. "
+        "`base_seq`가 현재 `collab_seq`와 다르면 409입니다."
+    ),
+    response=BlockSyncResponseSchema,
+    auth=jwt_auth,
+)
+async def sync_page_block_api(request, page_id: int, payload: BlockSyncSchema):
+    return await sync_to_async(sync_page_blocks)(request.auth, page_id, _dump(payload))
 
 
 @router.get(

@@ -283,5 +283,9 @@ sentry_sdk.init(
     auto_session_tracking=True,
 )
 
+# Workbot scheduler: 서버 프로세스 안에서 일정 확인. 끄려면 WORKBOT_SCHEDULER=0
+WORKBOT_SCHEDULER_ENABLED = os.getenv("WORKBOT_SCHEDULER", "1") != "0"
+WORKBOT_SCHEDULER_INTERVAL = int(os.getenv("WORKBOT_SCHEDULER_INTERVAL", 30))
+
 # Scheduling
 SCHEDULING_SECRET_KEY = os.getenv("SCHEDULING_SECRET_KEY")

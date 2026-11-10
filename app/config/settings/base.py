@@ -161,6 +161,10 @@ USE_L10N = True
 
 USE_TZ = False
 
+# 워크봇 예약 실행기. 서버 프로세스 안에서 돌릴지(railway에서만 기본 켬)와 확인 주기(초).
+WORKBOT_SCHEDULER_ENABLED = False
+WORKBOT_SCHEDULER_INTERVAL = 30
+
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/3.2/howto/static-files/
 

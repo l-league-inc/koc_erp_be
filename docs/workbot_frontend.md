@@ -5,7 +5,11 @@ audience: frontend
 
 # 워크봇 API
 
-자동화 워크봇 화면의 목록, 켜기, 실행 이력, 통계를 다룹니다. 인증은 기존 JWT입니다. 실행은 저장된 spec을 따르고, 매번 언어 모델을 부르지 않습니다. 초안 작성만 모델을 사용합니다.
+자동화 워크봇 화면의 목록, 켜기, 실행 이력, 통계를 다룹니다. 인증은 기존 JWT입니다. `notify`와 `create_record`는 저장된 spec대로만 실행하고 모델을 부르지 않습니다. `agent`는 일정 시각마다 저장된 지시(`instruction`)를 모델이 도구로 수행하므로 그때마다 모델을 씁니다. 초안 작성도 모델을 사용합니다.
+
+## 예약 실행
+
+서버가 30초마다 `enabled`이고 `next_run_at`이 지난 봇을 찾아 실행합니다. 봇을 만들거나 켜면 `next_run_at`이 채워지고, 실행이 시작되면 바로 다음 일정으로 넘어가므로 같은 일정이 두 번 실행되지 않습니다. 서버가 잠시 내려가 있어 놓친 일정은 올라온 뒤 한 번만 실행합니다. 시각은 서버 시간대(Asia/Seoul) 기준입니다. 일정으로 실행된 봇이 실패하면 만든 사용자에게 알림이 갑니다(`실행 실패: 사유`). 지금 실행으로 실패한 경우는 응답의 `failed`만 있습니다.
 
 ## 유저 플로우
 
@@ -24,6 +28,25 @@ audience: frontend
   "action": "notify",
   "notify_user_ids": [1],
   "message": "미작성 업무가 있습니다",
+  "requires_confirmation": false,
+  "record": null
+}
+```
+
+`action`은 세 가지입니다.
+
+- `notify`: `filters`에 맞는 레코드가 있으면 알림만 보냅니다.
+- `create_record`: 매번 같은 제목·값·`record.blocks`로 레코드를 만듭니다. 본문 `blocks`를 넣지 않으면 빈 페이지가 만들어집니다.
+- `agent`: 실행 때마다 모델이 `instruction`대로 레코드를 조회하고 본문이 채워진 페이지를 만들거나 고칩니다. 주간·일일 보고서처럼 내용이 매번 달라지는 문서는 이 동작입니다. `message`는 알림 앞머리이고, 알림 문구는 `message: 모델 요약`(200자 이내)입니다. `requires_confirmation`이 true이면 쓰기는 대기열(`payload.pending`)에 쌓이고, 확인 API를 부를 때 반영됩니다. 초안은 이 동작을 고르면 `spec.filters`를 비웁니다.
+
+`agent` 예:
+
+```json
+{
+  "action": "agent",
+  "filters": [],
+  "notify_user_ids": [],
+  "message": "주간 근태 보고서",
   "requires_confirmation": false,
   "record": null
 }
@@ -61,8 +84,10 @@ audience: frontend
 - 최근 실행의 점은 `success`와 그 외를 구분합니다.
 - AI 요청은 draft 응답을 미리보기로 보여주고, 만들기 버튼을 누를 때 생성 API를 호출합니다.
 - `waiting` 항목에 확인 동작을 붙입니다.
+- `spec.action`이 `agent`인 봇도 목록·편집에서 그대로 보여 줍니다. `record`는 null일 수 있습니다.
+- 실행 실패 알림은 일반 알림과 같은 API로 오고 `metadata`에 `workbot_id`, `run_id`가 있습니다.
 
 ## 비범위
 
 - 워크봇 삭제, 멤버 변경, 스키마 변경을 MCP 도구로 여는 것
-- 실행할 때마다 문장을 다시 모델에 보내는 것
+- `agent`가 레코드 삭제, 멤버 변경, 스키마 변경을 하는 것(레코드 생성·수정과 조회만 합니다)

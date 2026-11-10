@@ -6,7 +6,7 @@ from django.db.models import Count
 from django.utils import timezone
 from ninja.errors import HttpError
 
-from assistant import llm
+from assistant import llm, workbot_agent
 from assistant.models import Workbot, WorkbotRun
 from assistant.schedule import next_run_at, parse_cron
 from notification.models import Notification
@@ -20,7 +20,7 @@ from workspace.utils import (
 )
 
 logger = logging.getLogger("django")
-_ACTIONS = {"notify", "create_record"}
+_ACTIONS = {"notify", "create_record", "agent"}
 
 
 def validate_spec(spec: Any) -> dict[str, Any]:
@@ -28,7 +28,7 @@ def validate_spec(spec: Any) -> dict[str, Any]:
         raise HttpError(400, "spec은 객체여야 합니다.")
     action = spec.get("action")
     if action not in _ACTIONS:
-        raise HttpError(400, "동작은 notify 또는 create_record입니다.")
+        raise HttpError(400, "동작은 notify, create_record, agent 중 하나입니다.")
     filters = spec.get("filters") or []
     if not isinstance(filters, list):
         raise HttpError(400, "필터는 배열이어야 합니다.")
@@ -42,6 +42,8 @@ def validate_spec(spec: Any) -> dict[str, Any]:
     if action == "create_record":
         if not isinstance(record, dict) or not str(record.get("title") or "").strip():
             raise HttpError(400, "만들 레코드의 제목이 필요합니다.")
+        if record.get("blocks") is not None and not isinstance(record["blocks"], list):
+            raise HttpError(400, "레코드 본문 블록은 배열이어야 합니다.")
     else:
         record = None
     return {
@@ -261,7 +263,12 @@ def draft_workbot(user, workspace_id: int, instruction: str, model: str = "") ->
                     "매일 9시는 0 9 * * *, 매주 월요일 10시는 0 10 * * 1, 평일 9시는 0 9 * * 1-5입니다. "
                     "시각을 말하지 않았으면 0 9 * * 1-5입니다. "
                     "estimated_minutes는 요청에 있으면 그 분이고 없으면 10입니다. "
-                    "spec.action은 알림이면 notify, 레코드를 만들면 create_record입니다. "
+                    "spec.action은 세 가지입니다. "
+                    "notify는 조건에 맞는 레코드가 있으면 알림만 보냅니다. "
+                    "create_record는 매번 똑같은 제목과 값의 레코드를 만듭니다. 본문이 필요 없는 단순 등록에만 씁니다. "
+                    "agent는 실행할 때마다 기존 레코드를 조회해 내용을 정리·요약·작성해야 하는 일입니다. "
+                    "주간·일일 보고서, 현황 정리, 회의 자료, 요약 페이지처럼 본문이 있는 문서는 반드시 agent입니다. "
+                    "agent이면 spec.filters는 빈 배열이고 spec.message는 알림에 쓸 짧은 한국어 문구입니다. "
                     "spec.filters는 그 영역 속성 slug만 쓰는 조회 필터 배열입니다. 조건이 없으면 빈 배열입니다. "
                     "spec.notify_user_ids는 정수 배열입니다. 특정 사용자를 말하지 않았으면 빈 배열입니다. "
                     "spec.message는 알림일 때 사용자에게 보여줄 한국어 문구입니다. "
@@ -328,6 +335,8 @@ def _notify(bot: Workbot, run: WorkbotRun, user_ids: list[int], message: str) ->
 def _interpret(bot: Workbot, actor) -> dict[str, Any]:
     spec = validate_spec(bot.spec)
     database = _database(actor, bot.workspace_id, bot.database_slug)
+    if spec["action"] == "agent":
+        return _interpret_agent(bot, actor, spec)
     if spec["action"] == "notify":
         result = query_records(
             actor,
@@ -393,7 +402,11 @@ def _interpret(bot: Workbot, actor) -> dict[str, Any]:
     saved = create_record(
         actor,
         database.id,
-        {"title": spec["record"]["title"], "values": spec["record"].get("values") or {}},
+        {
+            "title": spec["record"]["title"],
+            "values": spec["record"].get("values") or {},
+            "blocks": spec["record"].get("blocks") or [],
+        },
         RecordActivity.Source.USER,
     )
     return {
@@ -406,33 +419,73 @@ def _interpret(bot: Workbot, actor) -> dict[str, Any]:
     }
 
 
-@transaction.atomic
-def run_workbot(bot: Workbot, actor) -> WorkbotRun:
+def _interpret_agent(bot: Workbot, actor, spec: dict[str, Any]) -> dict[str, Any]:
+    result = workbot_agent.run_agent(bot, actor, spec)
+    user_ids = spec["notify_user_ids"] or [bot.owner_id]
+    _member_ids(bot.workspace_id, user_ids)
+    headline = spec["message"] or bot.name
+    message = f"{headline}: {result['summary']}"
+    payload = {
+        "action": "agent",
+        "notify_user_ids": user_ids,
+        "message": message,
+        "pending": result["pending"],
+    }
+    if spec["requires_confirmation"]:
+        # 쓰기 도구가 대기열에 쌓인 상태라 확인 전에는 알리지도 반영하지도 않는다.
+        return {
+            "status": WorkbotRun.Status.WAITING,
+            "summary": result["summary"],
+            "record_ids": [],
+            "payload": payload,
+            "notify_user_ids": [],
+            "message": "",
+        }
+    return {
+        "status": WorkbotRun.Status.SUCCESS,
+        "summary": result["summary"],
+        "record_ids": result["record_ids"],
+        "payload": payload,
+        "notify_user_ids": user_ids,
+        "message": message,
+    }
+
+
+def _record_failure(bot: Workbot, reason: str, *, notify_owner: bool) -> WorkbotRun:
+    run = WorkbotRun.objects.create(
+        workbot=bot,
+        status=WorkbotRun.Status.FAILED,
+        summary=reason[:1000],
+    )
+    if notify_owner:
+        try:
+            _notify(bot, run, [bot.owner_id], f"{bot.name} 실행 실패: {reason}")
+        except Exception:
+            logger.exception("workbot failure notice id=%s", bot.id)
+    return run
+
+
+def run_workbot(bot: Workbot, actor, *, notify_failure: bool = False) -> WorkbotRun:
     now = timezone.now()
     try:
-        outcome = _interpret(bot, actor)
-        run = WorkbotRun.objects.create(
-            workbot=bot,
-            status=outcome["status"],
-            summary=outcome["summary"][:1000],
-            record_ids=outcome["record_ids"],
-            payload=outcome["payload"],
-        )
-        if outcome["notify_user_ids"]:
-            _notify(bot, run, outcome["notify_user_ids"], outcome["message"])
+        # 모델 호출이 길 수 있어 실행 전체를 하나의 트랜잭션으로 잡지 않고,
+        # 레코드 반영과 이력 기록만 함께 묶는다.
+        with transaction.atomic():
+            outcome = _interpret(bot, actor)
+            run = WorkbotRun.objects.create(
+                workbot=bot,
+                status=outcome["status"],
+                summary=outcome["summary"][:1000],
+                record_ids=outcome["record_ids"],
+                payload=outcome["payload"],
+            )
+            if outcome["notify_user_ids"]:
+                _notify(bot, run, outcome["notify_user_ids"], outcome["message"])
     except HttpError as exc:
-        run = WorkbotRun.objects.create(
-            workbot=bot,
-            status=WorkbotRun.Status.FAILED,
-            summary=exc.message,
-        )
+        run = _record_failure(bot, exc.message, notify_owner=notify_failure)
     except Exception:
         logger.exception("workbot id=%s", bot.id)
-        run = WorkbotRun.objects.create(
-            workbot=bot,
-            status=WorkbotRun.Status.FAILED,
-            summary="실행에 실패했습니다.",
-        )
+        run = _record_failure(bot, "실행에 실패했습니다.", notify_owner=notify_failure)
     bot.last_run_at = now
     if bot.enabled:
         bot.next_run_at = next_run_at(bot.schedule, now)
@@ -445,17 +498,45 @@ def run_workbot_by_id(user, workbot_id: int) -> dict[str, Any]:
     return serialize_run(run_workbot(bot, user))
 
 
-def run_due_workbots() -> int:
-    now = timezone.now()
-    bots = list(
-        Workbot.objects.select_related("owner").filter(
-            enabled=True,
-            next_run_at__isnull=False,
-            next_run_at__lte=now,
-        )
+def claim_due_workbots(now) -> list[Workbot]:
+    """실행할 봇의 `next_run_at`을 다음 일정으로 먼저 넘기고 이긴 쪽만 돌려줍니다.
+
+    워커가 여럿이거나 실행이 길어져도 같은 일정이 두 번 실행되지 않습니다.
+    """
+    # 켜져 있는데 다음 실행이 비어 있는 봇은 일정을 채워 다음 틱부터 실행되게 한다.
+    for bot in Workbot.objects.filter(enabled=True, next_run_at__isnull=True):
+        try:
+            Workbot.objects.filter(id=bot.id, next_run_at__isnull=True).update(
+                next_run_at=next_run_at(bot.schedule, now)
+            )
+        except HttpError:
+            logger.warning("workbot id=%s 일정 형식 오류 schedule=%r", bot.id, bot.schedule)
+    claimed: list[Workbot] = []
+    due = Workbot.objects.select_related("owner").filter(
+        enabled=True,
+        next_run_at__isnull=False,
+        next_run_at__lte=now,
     )
+    for bot in due.order_by("next_run_at", "id"):
+        try:
+            upcoming = next_run_at(bot.schedule, now)
+        except HttpError:
+            logger.warning("workbot id=%s 일정 형식 오류 schedule=%r", bot.id, bot.schedule)
+            continue
+        won = Workbot.objects.filter(id=bot.id, next_run_at=bot.next_run_at).update(
+            next_run_at=upcoming
+        )
+        if won:
+            bot.next_run_at = upcoming
+            claimed.append(bot)
+    return claimed
+
+
+def run_due_workbots() -> int:
+    bots = claim_due_workbots(timezone.now())
     for bot in bots:
-        run_workbot(bot, bot.owner)
+        logger.info("workbot run id=%s name=%s", bot.id, bot.name)
+        run_workbot(bot, bot.owner, notify_failure=True)
     return len(bots)
 
 
@@ -485,11 +566,20 @@ def confirm_run(user, run_id: int) -> dict[str, Any]:
         saved = create_record(
             user,
             int(payload["database_id"]),
-            {"title": record.get("title"), "values": record.get("values") or {}},
+            {
+                "title": record.get("title"),
+                "values": record.get("values") or {},
+                "blocks": record.get("blocks") or [],
+            },
             RecordActivity.Source.USER,
         )
         run.record_ids = [saved["id"]]
         run.summary = f"{saved['title']}을 만들었습니다."
+    elif payload.get("action") == "agent":
+        run.record_ids = workbot_agent.apply_pending(bot, user, payload.get("pending") or [])
+        user_ids = payload.get("notify_user_ids") or []
+        _member_ids(bot.workspace_id, user_ids)
+        _notify(bot, run, user_ids, str(payload.get("message") or run.summary))
     else:
         raise HttpError(400, "확정할 내용이 없습니다.")
     run.status = WorkbotRun.Status.SUCCESS

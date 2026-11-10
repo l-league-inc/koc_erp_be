@@ -128,3 +128,7 @@ Hermes Agent의 언어 모델은 ChatGPT(OpenAI) API 키를 사용합니다. 이
 Hermes나 ChatGPT 커넥터는 기존 MCP(`/mcp`) OAuth로 붙습니다. 도구 연결은 이 서버의 MCP입니다. Notion API 키는 쓰지 않습니다. 데이터는 Django 워크스페이스에 있고, Hermes는 레코드를 조회하거나 만들고 고치는 도구만 호출합니다.
 
 앱 화면의 대화는 `/api/v1/agent`가 같은 모델을 호출합니다. 프롬프트에는 스킬 이름과 설명만 넣고, 필요한 스킬 전문을 읽은 뒤 처리합니다. 생성·수정은 사용자가 확정한 뒤에 저장합니다.
+
+## 워크봇 예약 실행기
+
+서버 프로세스(`config/asgi.py`)가 뜨면 `assistant.scheduler`의 백그라운드 스레드가 30초마다 `run_due_workbots`를 부릅니다. railway 설정에서는 기본으로 켜지고 `WORKBOT_SCHEDULER=0`이면 끕니다. 주기는 `WORKBOT_SCHEDULER_INTERVAL`(초)입니다. 워커가 여러 개여도 `claim_due_workbots`가 `next_run_at`을 조건부 UPDATE로 먼저 다음 일정으로 넘기므로 중복 실행되지 않습니다. 서버 안 스케줄러를 끈 환경에서는 `python manage.py run_workbot_scheduler`를 별도 프로세스로 두거나 `python manage.py run_due_workbots`를 주기적으로 부릅니다.

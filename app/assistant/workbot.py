@@ -268,6 +268,8 @@ def draft_workbot(user, workspace_id: int, instruction: str, model: str = "") ->
                     "create_record는 매번 똑같은 제목과 값의 레코드를 만듭니다. 본문이 필요 없는 단순 등록에만 씁니다. "
                     "agent는 실행할 때마다 기존 레코드를 조회해 내용을 정리·요약·작성해야 하는 일입니다. "
                     "주간·일일 보고서, 현황 정리, 회의 자료, 요약 페이지처럼 본문이 있는 문서는 반드시 agent입니다. "
+                    "이번 주, 오늘, 지난주처럼 실행하는 날에 따라 날짜가 달라지는 레코드는 반드시 agent입니다. "
+                    "create_record에는 고정된 날짜를 넣지 않습니다. "
                     "agent이면 spec.filters는 빈 배열이고 spec.message는 알림에 쓸 짧은 한국어 문구입니다. "
                     "spec.filters는 그 영역 속성 slug만 쓰는 조회 필터 배열입니다. 조건이 없으면 빈 배열입니다. "
                     "spec.notify_user_ids는 정수 배열입니다. 특정 사용자를 말하지 않았으면 빈 배열입니다. "

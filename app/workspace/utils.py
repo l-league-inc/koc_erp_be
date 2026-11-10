@@ -493,20 +493,71 @@ def normalize_property_config(prop_type: str, config: dict | None, workspace_id:
     return payload
 
 
+_LOOSE_DATE = re.compile(
+    r"(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})\s*일?"
+    r"(?:\s*(?:T|\s)\s*(오전|오후)?\s*(\d{1,2})\s*[:시]\s*(\d{2})?)?"
+)
+_RANGE_SPLIT = re.compile(r"\s*(?:~|∼|→|–|—|\s-\s|부터)\s*")
+
+
+def _loose_datetime(text: str) -> datetime | None:
+    """`2026.11.10`, `2026년 11월 10일 오후 3:00 (GMT+9)` 같은 흔한 표기를 읽습니다."""
+    cleaned = re.sub(r"\((?:GMT|UTC)[^)]*\)|\bKST\b", "", text).strip()
+    match = _LOOSE_DATE.search(cleaned)
+    if match is None:
+        return None
+    year, month, day, ampm, hour, minute = match.groups()
+    clock = 0
+    if hour is not None:
+        clock = int(hour)
+        if ampm == "오후" and clock < 12:
+            clock += 12
+        elif ampm == "오전" and clock == 12:
+            clock = 0
+    try:
+        return datetime(int(year), int(month), int(day), clock, int(minute or 0))
+    except ValueError:
+        return None
+
+
 def _parse_datetime(raw: Any) -> datetime:
     if isinstance(raw, datetime):
-        parsed = raw
+        parsed: datetime | None = raw
     else:
         text = str(raw).strip()
-        parsed = parse_datetime(text)
+        parsed = None
+        try:
+            parsed = parse_datetime(text)
+            if parsed is None:
+                parsed_date = parse_date(text)
+                if parsed_date is not None:
+                    parsed = datetime.combine(parsed_date, time.min)
+        except ValueError:
+            parsed = None
         if parsed is None:
-            parsed_date = parse_date(text)
-            if parsed_date is None:
-                raise HttpError(400, "날짜 형식이 올바르지 않습니다.")
-            parsed = datetime.combine(parsed_date, time.min)
+            parsed = _loose_datetime(text)
+        if parsed is None:
+            raise HttpError(400, f"날짜 형식이 올바르지 않습니다: {text[:40]}")
     if parsed.tzinfo is not None:
         parsed = parsed.replace(tzinfo=None)
     return parsed
+
+
+def _split_date_range(raw: Any) -> Any:
+    """`2026-11-09 ~ 2026-11-15` 한 문자열을 `{start, end}`로 바꿉니다."""
+    if not isinstance(raw, str):
+        return raw
+    parts = [part for part in _RANGE_SPLIT.split(raw.strip()) if part]
+    if len(parts) == 2 and all(_loose_datetime(part) or _is_iso(part) for part in parts):
+        return {"start": parts[0], "end": parts[1]}
+    return raw
+
+
+def _is_iso(text: str) -> bool:
+    try:
+        return parse_datetime(text) is not None or parse_date(text) is not None
+    except ValueError:
+        return False
 
 
 def _clear_value(record: Record, prop: Property) -> None:
@@ -710,16 +761,22 @@ def _coerce(prop: Property, raw: Any, record: Record) -> dict[str, Any]:
             raise HttpError(400, "숫자 형식이 올바르지 않습니다.") from None
         return {"number_value": number, "text_value": format(number, "f")}
     if prop_type == Property.Type.DATE:
-        if isinstance(raw, dict):
-            if not raw.get("start"):
-                raise HttpError(400, "날짜 시작 값이 필요합니다.")
-            start = _parse_datetime(raw.get("start"))
-            end = _parse_datetime(raw.get("end")) if raw.get("end") else None
-            if end is not None and end < start:
-                raise HttpError(400, "날짜 종료는 시작보다 빠를 수 없습니다.")
-        else:
-            start = _parse_datetime(raw)
-            end = None
+        raw = _split_date_range(raw)
+        try:
+            if isinstance(raw, dict):
+                if not raw.get("start"):
+                    raise HttpError(400, "날짜 시작 값이 필요합니다.")
+                start = _parse_datetime(raw.get("start"))
+                end = _parse_datetime(raw.get("end")) if raw.get("end") else None
+                if end is not None and end < start:
+                    raise HttpError(400, "날짜 종료는 시작보다 빠를 수 없습니다.")
+            else:
+                start = _parse_datetime(raw)
+                end = None
+        except HttpError as exc:
+            if "날짜 형식" in exc.message:
+                raise HttpError(400, f"'{prop.name}' 속성: {exc.message}") from None
+            raise
         return {"date_start": start, "date_end": end, "text_value": start.isoformat()}
     if prop_type == Property.Type.CHECKBOX:
         if not isinstance(raw, bool):

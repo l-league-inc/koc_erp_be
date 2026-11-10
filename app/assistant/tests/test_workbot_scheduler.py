@@ -155,3 +155,36 @@ class WorkbotSchedulerTests(TestCase):
     @override_settings(WORKBOT_SCHEDULER_ENABLED=False)
     def test_scheduler_off_by_setting(self):
         self.assertFalse(scheduler.start_scheduler())
+
+
+class WorkbotDateValueTests(WorkbotSchedulerTests):
+    def _run_with_date(self, value):
+        bot = self._bot(
+            {
+                "action": "create_record",
+                "filters": [],
+                "record": {"title": "날짜 문서", "values": {"due_date": value}},
+            }
+        )
+        run_due_workbots()
+        return WorkbotRun.objects.get(workbot=bot)
+
+    def test_accepts_common_date_formats(self):
+        for value in (
+            "2026.11.09",
+            "2026/11/09",
+            "2026년 11월 9일",
+            "2026년 11월 9일 오후 3:00 (GMT+9)",
+            "2026-11-09 ~ 2026-11-15",
+            {"start": "2026년 11월 9일", "end": "2026.11.15"},
+        ):
+            with self.subTest(value=value):
+                Record.objects.filter(title="날짜 문서").delete()
+                run = self._run_with_date(value)
+                self.assertEqual(run.status, WorkbotRun.Status.SUCCESS, run.summary)
+
+    def test_bad_date_reports_property_and_value(self):
+        run = self._run_with_date("이번 주 월요일")
+        self.assertEqual(run.status, WorkbotRun.Status.FAILED)
+        self.assertIn("일자", run.summary)
+        self.assertIn("이번 주 월요일", run.summary)

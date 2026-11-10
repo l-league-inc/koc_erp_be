@@ -189,10 +189,13 @@ async def logout_api(request, payload: Optional[schema.LogoutSchema] = None):
     refresh = payload.refresh if payload else None
     refresh = refresh or request.COOKIES.get("refresh")
     active_jwt = None
-    try:
-        active_jwt = await Jwt.objects.select_related("user").aget(refresh=refresh)
-    except Jwt.DoesNotExist:
-        pass
+    if refresh:
+        active_jwt = await Jwt.objects.filter(refresh=refresh).afirst()
+    if active_jwt is None:
+        # 서버 사이드 호출은 refresh 쿠키가 없고 Bearer access만 있다. 그 세션만 폐기한다.
+        scheme, _, bearer = request.headers.get("Authorization", "").partition(" ")
+        if scheme.lower() == "bearer" and bearer.strip():
+            active_jwt = await Jwt.objects.filter(access=bearer.strip()).afirst()
     if active_jwt:
         await active_jwt.adelete()
 

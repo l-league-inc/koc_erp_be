@@ -443,19 +443,60 @@ def canonical_option_name(prop: Property, raw: Any) -> str:
     raise HttpError(400, f"{prop.name}에 없는 값입니다.")
 
 
-def normalize_property_config(prop_type: str, config: dict | None, workspace_id: int) -> dict:
+def _generated_option_id(name: str, taken: set[str]) -> str:
+    """이름에서 옵션 id를 만듭니다. 영문·숫자가 없으면 `option_N`을 씁니다."""
+    base = re.sub(r"[^a-z0-9_]+", "_", name.lower()).strip("_")[:40]
+    if not SLUG_PATTERN.match(base):
+        base = "option"
+    candidate = base
+    number = 1
+    while candidate in taken:
+        number += 1
+        candidate = f"{base}_{number}"
+    return candidate
+
+
+def _coerce_options(options: list[Any]) -> list[dict[str, Any]]:
+    """문자열 또는 id 없는 객체를 `{id, name, color}`로 맞춥니다."""
+    taken = {
+        str(option["id"]) for option in options if isinstance(option, dict) and option.get("id")
+    }
+    coerced: list[dict[str, Any]] = []
+    for option in options:
+        if isinstance(option, str):
+            option = {"name": option}
+        if not isinstance(option, dict):
+            raise HttpError(400, "선택 옵션 형식이 올바르지 않습니다.")
+        if not option.get("id"):
+            name = str(option.get("name", "")).strip()
+            if not name:
+                raise HttpError(400, "선택 옵션 이름이 필요합니다.")
+            generated = _generated_option_id(name, taken)
+            taken.add(generated)
+            option = {**option, "id": generated}
+        coerced.append(option)
+    return coerced
+
+
+def normalize_property_config(
+    prop_type: str,
+    config: dict | None,
+    workspace_id: int,
+    *,
+    allow_empty_options: bool = False,
+) -> dict:
     payload = dict(config or {})
     if prop_type not in Property.Type.values:
         raise HttpError(400, "지원하지 않는 속성 타입입니다.")
     if prop_type in OPTION_TYPES:
         options = payload.get("options")
-        if not isinstance(options, list) or not options:
+        if options is None and allow_empty_options:
+            options = []
+        if not isinstance(options, list) or (not options and not allow_empty_options):
             raise HttpError(400, "선택 옵션이 필요합니다.")
         cleaned = []
         seen: set[str] = set()
-        for option in options:
-            if not isinstance(option, dict):
-                raise HttpError(400, "선택 옵션 형식이 올바르지 않습니다.")
+        for option in _coerce_options(options):
             option_id = validate_slug(str(option.get("id", "")))
             name = str(option.get("name", "")).strip()
             if not name:
@@ -1453,10 +1494,13 @@ def update_property(user, property_id: int, data: dict[str, Any]) -> dict[str, A
         prop.type = next_type
     previous_synced = (prop.config or {}).get("synced_property_id")
     if type_changed or ("config" in data and data["config"] is not None):
+        incoming = data.get("config")
         prop.config = normalize_property_config(
             prop.type,
-            data.get("config") if data.get("config") is not None else prop.config,
+            incoming if incoming is not None else prop.config,
             prop.database.workspace_id,
+            # 값이 없는 속성의 타입만 바꿀 때는 옵션 없이 시작하고 나중에 채운다.
+            allow_empty_options=type_changed and incoming is None,
         )
     if data.get("name") is not None:
         prop.name = str(data["name"]).strip()

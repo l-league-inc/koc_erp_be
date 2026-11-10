@@ -105,7 +105,7 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 
 `DELETE /property/{property_id}` 제목 속성은 400입니다.
 
-타입은 `title`, `text`, `number`, `select`, `multi_select`, `status`, `date`, `checkbox`, `url`, `email`, `phone`, `people`, `files`, `relation`입니다. `select`, `multi_select`, `status`는 `config.options`가 필수이고 항목은 `{id, name, color}`입니다. `relation`의 `config`는 `{database_id}`이고 같은 워크스페이스의 데이터베이스 id입니다.
+타입은 `title`, `text`, `number`, `select`, `multi_select`, `status`, `date`, `checkbox`, `url`, `email`, `phone`, `people`, `files`, `relation`입니다. `select`, `multi_select`, `status`는 생성할 때 `config.options`가 필수이고 항목은 `{id, name, color}`입니다. 항목을 이름 문자열(`["대기", "진행"]`)로 보내거나 `id`를 빼고 `{name}`만 보내도 서버가 `id`(이름의 영문·숫자, 없으면 `option`, `option_2`…)와 `color`(`gray`)를 채워 저장합니다. 응답은 항상 `{id, name, color}`입니다. 값이 없는 속성의 `type`만 바꿀 때(`PATCH`에 `config` 없음)는 옵션이 비어 있는 상태로 바뀌고, 이전 옵션이 있으면 유지됩니다. `relation`으로 바꿀 때는 `config.database_id`가 여전히 필요합니다. `relation`의 `config`는 `{database_id}`이고 같은 워크스페이스의 데이터베이스 id입니다.
 
 ## 값 모양
 

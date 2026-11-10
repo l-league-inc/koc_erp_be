@@ -148,6 +148,85 @@ class WorkspaceApiTests(TestCase):
         )()
         self.assertEqual(remaining, 1)
 
+    async def test_select_property_accepts_plain_string_options(self):
+        sales_id = await self._sales_id()
+        headers = self.headers()
+        created = await self.client.post(
+            f"/database/{sales_id}/property",
+            json={
+                "name": "단계",
+                "slug": "stage",
+                "type": "select",
+                "config": {"options": ["대기", "진행", "완료", "done", "done"]},
+            },
+            headers=headers,
+        )
+        self.assertEqual(created.status_code, 400, created.json())
+
+        created = await self.client.post(
+            f"/database/{sales_id}/property",
+            json={
+                "name": "단계",
+                "slug": "stage",
+                "type": "select",
+                "config": {"options": ["대기", "진행", "done", "Done "]},
+            },
+            headers=headers,
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        options = created.json()["config"]["options"]
+        self.assertEqual([item["name"] for item in options], ["대기", "진행", "done", "Done"])
+        ids = [item["id"] for item in options]
+        self.assertEqual(len(set(ids)), 4)
+        self.assertTrue(all(item["color"] == "gray" for item in options))
+
+        record = await self.client.post(
+            f"/database/{sales_id}/record",
+            json={"title": "단계 확인", "values": {"stage": "진행"}},
+            headers=headers,
+        )
+        self.assertEqual(record.status_code, 201, record.json())
+        self.assertEqual(record.json()["values"]["stage"], "진행")
+
+    async def test_property_type_change_without_config_starts_with_empty_options(self):
+        sales_id = await self._sales_id()
+        headers = self.headers()
+        created = await self.client.post(
+            f"/database/{sales_id}/property",
+            json={"name": "분류", "slug": "bucket", "type": "text"},
+            headers=headers,
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        changed = await self.client.patch(
+            f"/property/{created.json()['id']}",
+            json={"type": "multi_select"},
+            headers=headers,
+        )
+        self.assertEqual(changed.status_code, 200, changed.json())
+        self.assertEqual(changed.json()["type"], "multi_select")
+        self.assertEqual(changed.json()["config"]["options"], [])
+
+        relation = await self.client.post(
+            f"/database/{sales_id}/property",
+            json={"name": "연결", "slug": "link", "type": "text"},
+            headers=headers,
+        )
+        rejected = await self.client.patch(
+            f"/property/{relation.json()['id']}",
+            json={"type": "relation"},
+            headers=headers,
+        )
+        self.assertEqual(rejected.status_code, 400, rejected.json())
+
+    async def test_select_property_create_still_requires_options(self):
+        sales_id = await self._sales_id()
+        response = await self.client.post(
+            f"/database/{sales_id}/property",
+            json={"name": "빈 선택", "slug": "empty_pick", "type": "select"},
+            headers=self.headers(),
+        )
+        self.assertEqual(response.status_code, 400, response.json())
+
     async def test_member_list_returns_names_for_members_only(self):
         self.user.name = "박승원"
         await sync_to_async(self.user.save)(update_fields=["name"])

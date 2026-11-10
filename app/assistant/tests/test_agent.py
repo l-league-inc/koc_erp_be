@@ -107,6 +107,7 @@ class AgentApiTests(TestCase):
         )
         self.assertEqual(confirmed.status_code, 200, confirmed.json())
         record_id = confirmed.json()["records"][0]["record_id"]
+        self.assertIsInstance(confirmed.json()["records"][0]["database_id"], int)
         activity = await sync_to_async(RecordActivity.objects.get)(record_id=record_id)
         self.assertEqual(activity.source, RecordActivity.Source.AGENT)
 

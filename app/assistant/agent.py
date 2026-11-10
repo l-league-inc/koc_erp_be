@@ -566,7 +566,12 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
             )
             action.result = {"record_id": saved["id"]}
             records.append(
-                {"action_id": action.id, "record_id": saved["id"], "title": saved["title"]}
+                {
+                    "action_id": action.id,
+                    "record_id": saved["id"],
+                    "database_id": saved["database_id"],
+                    "title": saved["title"],
+                }
             )
         elif action.kind == ProposedAction.Kind.UPDATE_RECORD:
             saved = update_record(
@@ -580,7 +585,12 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
             )
             action.result = {"record_id": saved["id"]}
             records.append(
-                {"action_id": action.id, "record_id": saved["id"], "title": saved["title"]}
+                {
+                    "action_id": action.id,
+                    "record_id": saved["id"],
+                    "database_id": saved["database_id"],
+                    "title": saved["title"],
+                }
             )
         elif action.kind in {
             ProposedAction.Kind.CREATE_SKILL,

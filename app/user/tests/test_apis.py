@@ -1,3 +1,4 @@
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.test import TestCase
 from django.contrib.auth import get_user_model
@@ -8,6 +9,7 @@ from user.api import router
 from django.utils import timezone
 from datetime import timedelta
 from api.testing import TestAsyncClient
+from user.models import Jwt
 from verification.models import PhonenumberVerification
 
 User = get_user_model()
@@ -288,6 +290,19 @@ class TestAuth(TestCase):
         response = await self.client.get("/logout", json=data)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json().get("detail"), "로그아웃 되었습니다.")
+
+    async def test_logout_with_bearer_only(self):
+        """서버 사이드 로그아웃: refresh 없이 Bearer access만으로 해당 세션을 폐기한다"""
+        headers = await self.authenticate()
+        access = headers["Authorization"].split(" ", 1)[1]
+        self.assertTrue(await Jwt.objects.filter(access=access).aexists())
+        other = await sync_to_async(Jwt.objects.create)(
+            user=self.user, access="other-access", refresh="other-refresh"
+        )
+        response = await self.client.get("/logout", headers=headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(await Jwt.objects.filter(access=access).aexists())
+        self.assertTrue(await Jwt.objects.filter(id=other.id).aexists())
 
     async def test_refresh(self):
         """토큰 재발급 테스트 - 쿠키 방식"""

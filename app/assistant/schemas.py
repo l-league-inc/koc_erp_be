@@ -74,6 +74,7 @@ class ConfirmSchema(Schema):
 class ConfirmedRecordSchema(Schema):
     action_id: int
     record_id: int
+    database_id: int
     title: str
 
 

@@ -64,7 +64,7 @@ audience: frontend
 
 스킬 생성 `payload`는 `name`, `description`, `body`, `enabled`입니다. 수정 `payload`는 `name`과 바뀐 `description`, `body`, `enabled`입니다. `name`은 영문 소문자로 시작하고 숫자와 `_`만 씁니다. 고정 스킬 이름 `attendance`, `schedule`, `quote`, `travel`, `after_service`는 만들거나 고칠 수 없습니다.
 
-대화 목록 항목은 `id`, `workspace_id`, `database_slug`, `preview`, `created_at`, `updated_at`입니다. 상세는 여기에 `messages`, `proposed_actions`가 있습니다. 메시지는 `id`, `role`(`user`/`assistant`), `content`, `created_at`입니다. 초안은 `id`, `kind`, `status`(`pending`/`confirmed`/`rejected`), `payload`, `result`입니다. 메시지 전송 응답은 `message`, `proposed_actions`입니다. 확정 응답은 `proposed_actions`, `records`, `skills`입니다. `records` 항목은 `action_id`, `record_id`, `title`입니다. `skills` 항목은 `action_id`, `skill_id`, `name`입니다. 레코드 초안만 확정하면 `skills`는 빈 배열입니다.
+대화 목록 항목은 `id`, `workspace_id`, `database_slug`, `preview`, `created_at`, `updated_at`입니다. 상세는 여기에 `messages`, `proposed_actions`가 있습니다. 메시지는 `id`, `role`(`user`/`assistant`), `content`, `created_at`입니다. 초안은 `id`, `kind`, `status`(`pending`/`confirmed`/`rejected`), `payload`, `result`입니다. 메시지 전송 응답은 `message`, `proposed_actions`입니다. 확정 응답은 `proposed_actions`, `records`, `skills`입니다. `records` 항목은 `action_id`, `record_id`, `database_id`, `title`입니다. `database_id`로 해당 데이터베이스의 레코드 목록 캐시만 무효화할 수 있습니다. `skills` 항목은 `action_id`, `skill_id`, `name`입니다. 레코드 초안만 확정하면 `skills`는 빈 배열입니다.
 
 스킬 목록 항목은 `id`, `workspace_id`, `name`, `description`, `body`, `source`(`bundled`/`user`), `enabled`, `created_at`, `updated_at`입니다. 고정 스킬은 `enabled`가 true이고 시각은 `null`입니다. 생성 본문은 `workspace_id`, `name`, `description`, `body`, `enabled`입니다.
 

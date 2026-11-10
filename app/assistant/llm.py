@@ -251,6 +251,9 @@ def _openai_body(model_id: str, messages: list[dict[str, Any]], tools: list[dict
         body["tools"] = _to_responses_tools(tools)
     else:
         body["text"] = {"format": {"type": "json_object"}}
+        # json_object 형식은 instructions가 아니라 input 메시지에 'json'이 있어야 한다.
+        if not any("json" in str(item).lower() for item in items):
+            items.append({"role": "user", "content": "응답은 JSON 객체로만 작성하세요."})
     return body
 
 

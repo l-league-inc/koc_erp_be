@@ -26,6 +26,23 @@ class LlmRoutingTests(SimpleTestCase):
         self.assertEqual(body["model"], "gpt-6.1-sol")
         self.assertEqual(body["reasoning"]["effort"], "low")
 
+    @override_settings(OPENAI_API_KEY="test-key", ANTHROPIC_API_KEY="")
+    @patch("assistant.llm.requests.post")
+    def test_openai_json_mode_has_json_word_in_input(self, post):
+        post.return_value.status_code = 200
+        post.return_value.json.return_value = {"output_text": '{"name": "봇"}', "output": []}
+        parsed = complete_json(
+            [
+                {"role": "system", "content": "JSON으로만 답합니다."},
+                {"role": "user", "content": "봇을 만들어줘"},
+            ],
+            model="gpt-6.1-sol",
+        )
+        self.assertEqual(parsed["name"], "봇")
+        body = post.call_args.kwargs["json"]
+        self.assertEqual(body["text"], {"format": {"type": "json_object"}})
+        self.assertTrue(any("json" in str(item).lower() for item in body["input"]))
+
     @override_settings(ANTHROPIC_API_KEY="test-key")
     @patch("assistant.llm.requests.post")
     def test_anthropic_model_uses_messages_api(self, post):

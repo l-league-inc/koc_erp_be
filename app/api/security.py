@@ -127,6 +127,30 @@ class AdminAuth(JWTAuth):
 admin_auth = AdminAuth()
 
 
+class UserManagerAuth(ActiveUserAuth):
+    """시스템 관리자이거나 어느 워크스페이스의 owner/admin인 사용자만 통과시킵니다."""
+
+    async def authenticate(self, request, token):
+        user = await super().authenticate(request, token)
+        if user is None:
+            return None
+        if user.permission_type == User.UserPermissionTypeChoices.ADMIN:
+            return user
+
+        from workspace.models import WorkspaceMember
+
+        is_manager = await WorkspaceMember.objects.filter(
+            user=user,
+            role__in=[WorkspaceMember.Role.OWNER, WorkspaceMember.Role.ADMIN],
+        ).aexists()
+        if not is_manager:
+            raise HttpError(403, "유저를 등록할 권한이 없습니다.")
+        return user
+
+
+manager_auth = UserManagerAuth()
+
+
 class WithdrawAuth(JWTAuth):
     async def authenticate(self, request, token):
         user = await super().authenticate(request, token)

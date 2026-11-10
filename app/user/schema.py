@@ -9,10 +9,43 @@ import re
 from api.choices import enum_field
 
 
-class UserSignupSchema(Schema):
+def _check_phone_number(value: Optional[str]) -> Optional[str]:
+    if value and not re.match(r"^\d{10,12}$", value):
+        raise HttpError(400, "유효하지 않은 전화번호 형식입니다.")
+    return value
+
+
+class _UserCredentialSchema(Schema):
     email: str
     password: str
     password2: str
+
+    @field_validator("email")
+    def validate_email(cls, v):
+        pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+        if not re.match(pattern, v):
+            raise HttpError(400, "유효하지 않은 이메일 형식입니다.")
+        return v
+
+    @field_validator("password")
+    def password_length(cls, v):
+        if len(v) < 8:
+            raise HttpError(400, "비밀번호는 8자 이상이어야 합니다.")
+        if not re.search(r"[a-z]", v):
+            raise HttpError(400, "비밀번호는 최소 하나의 소문자를 포함해야 합니다.")
+        if not re.search(r"\d", v):
+            raise HttpError(400, "비밀번호는 최소 하나의 숫자를 포함해야 합니다.")
+        return v
+
+    @field_validator("password2")
+    def passwords_match(cls, v, values):
+        values = values.data
+        if "password" in values and v != values["password"]:
+            raise HttpError(400, "비밀번호가 일치하지 않습니다.")
+        return v
+
+
+class UserSignupSchema(_UserCredentialSchema):
     phone_number: str = Field(
         description="전화번호",
     )
@@ -29,46 +62,35 @@ class UserSignupSchema(Schema):
         description="전화번호 해시",
     )
 
-    @field_validator("email")
-    def validate_email(cls, v):
-        pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
-        if not re.match(pattern, v):
-            raise HttpError(400, "유효하지 않은 이메일 형식입니다.")
-        return v
-
     @field_validator("phone_number")
     def validate_phone_number(cls, v):
-        pattern = r"^\d{10,12}$"
-        if v and not re.match(pattern, v):
-            raise HttpError(400, "유효하지 않은 전화번호 형식입니다.")
-        return v
-
-    @field_validator("password")
-    def password_length(cls, v):
-        if len(v) < 8:
-            raise HttpError(400, "비밀번호는 8자 이상이어야 합니다.")
-        if not re.search(r"[a-z]", v):
-            raise HttpError(400, "비밀번호는 최소 하나의 소문자를 포함해야 합니다.")
-        if not re.search(r"\d", v):
-            raise HttpError(400, "비밀번호는 최소 하나의 숫자를 포함해야 합니다.")
-        # if not re.search(r"[A-Z]", v):
-        #     raise HttpError(400, "비밀번호는 최소 하나의 대문자를 포함해야 합니다.")
-        # if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", v):
-        #     raise HttpError(400, "비밀번호는 최소 하나의 특수문자를 포함해야 합니다.")
-        return v
-
-    @field_validator("password2")
-    def passwords_match(cls, v, values):
-        values = values.data
-        if "password" in values and v != values["password"]:
-            raise HttpError(400, "비밀번호가 일치하지 않습니다.")
-        return v
+        return _check_phone_number(v)
 
     @field_validator("type")
     def user_type_check(cls, v, values):
         if v not in User.UserTypeChoices.values:
             raise HttpError(400, "유저 타입이 올바르지 않습니다.")
         return v
+
+
+class AdminUserSignupSchema(_UserCredentialSchema):
+    """관리자/소유자가 대신 만드는 계정입니다. 전화번호 인증 해시는 받지 않습니다."""
+
+    name: str = Field(description="이름")
+    phone_number: Optional[str] = Field(None, description="전화번호. 숫자만 10~12자리")
+
+    @field_validator("name")
+    def validate_name(cls, v):
+        cleaned = (v or "").strip()
+        if not cleaned:
+            raise HttpError(400, "이름을 입력해주세요.")
+        if len(cleaned) > 30:
+            raise HttpError(400, "이름은 30자 이하여야 합니다.")
+        return cleaned
+
+    @field_validator("phone_number")
+    def validate_phone_number(cls, v):
+        return _check_phone_number(v or None)
 
 
 class UserLoginSchema(Schema):

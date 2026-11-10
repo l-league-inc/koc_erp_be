@@ -15,6 +15,16 @@ class WorkspaceUpdateSchema(Schema):
     slug: Optional[str] = None
 
 
+class WorkspaceMemberCreateSchema(Schema):
+    user_id: Optional[int] = Field(None, description="등록할 유저 id. email과 둘 중 하나")
+    email: Optional[str] = Field(None, description="등록할 유저 이메일. user_id와 둘 중 하나")
+    role: str = Field("member", description="owner, admin, member")
+
+
+class WorkspaceMemberUpdateSchema(Schema):
+    role: str = Field(description="owner, admin, member")
+
+
 class DatabaseCreateSchema(Schema):
     """데이터베이스를 만듭니다. section이 같으면 한 사이드바 페이지입니다."""
 

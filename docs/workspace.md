@@ -7,7 +7,7 @@ KOC 워크스페이스의 데이터 원본은 Django입니다. Notion.com과 동
 | 모델 | 역할 |
 |------|------|
 | `Workspace` | 회사 공간. 슬러그 `koc`가 기본 시드 |
-| `WorkspaceMember` | `owner` / `admin` / `member`. 이름 조회는 `GET /{workspace_id}/member` |
+| `WorkspaceMember` | `owner` / `admin` / `member`. 이름 조회는 `GET /{workspace_id}/member`, 등록·관리는 [workspace_members_frontend.md](workspace_members_frontend.md) |
 | `Database` | 업무 데이터베이스. `section`은 페이지 이름, `section_slug`는 페이지 키. `access`는 본문 수정 권한 `member` 또는 `admin`. `seed_koc_workspace` 슬러그는 `hr`, `daily`, `gov`, `purchase`, `sales`, `docs` |
 | `Page` | 사이드바 노드. `folder`, `document`, `database`, `linked_view`. 데이터베이스 페이지는 직계 폴더의 이름과 키를 `section`에 맞춥니다. 문서의 `access`는 그 페이지 블록 수정 권한 |
 | `PageFavorite` | 사용자별 페이지 즐겨찾기 |

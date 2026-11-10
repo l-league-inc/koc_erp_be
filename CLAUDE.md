@@ -39,6 +39,7 @@ applyTo: "**"
 | [workspace_frontend.md](../docs/workspace_frontend.md) | KOC 워크스페이스 데이터베이스·레코드·조회 계약 |
 | [koc_pages_frontend.md](../docs/koc_pages_frontend.md) | 기본 페이지 묶음, CSV 데이터베이스 속성, 통합관리대장 |
 | [workspace_page_frontend.md](../docs/workspace_page_frontend.md) | 페이지 아이콘, 서식 블록, 댓글, 활동, 보기, 템플릿, 휴지통 |
+| [workspace_members_frontend.md](../docs/workspace_members_frontend.md) | 관리자 유저 등록, 워크스페이스 멤버 등록·역할·제외 |
 | [workspace_realtime_frontend.md](../docs/workspace_realtime_frontend.md) | 워크스페이스 WebSocket 변경 알림 |
 | [workspace_collab_frontend.md](../docs/workspace_collab_frontend.md) | 문서방 블록 동기화와 커서 |
 | [workspace_block_sync_frontend.md](../docs/workspace_block_sync_frontend.md) | 문서·레코드 본문 통째 저장, `base_seq` 충돌, 개정 간격 |

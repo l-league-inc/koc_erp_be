@@ -19,6 +19,16 @@ class WorkspaceMemberResponseSchema(Schema):
     role: str
 
 
+class WorkspaceMemberDetailResponseSchema(Schema):
+    user_id: int
+    name: str
+    email: str
+    phone_number: str
+    user_status: str
+    role: str
+    joined_at: datetime
+
+
 class PropertyResponseSchema(Schema):
     id: int
     database_id: int

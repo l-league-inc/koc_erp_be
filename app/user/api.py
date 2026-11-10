@@ -2,11 +2,18 @@ import os
 from datetime import timedelta
 from typing import List, Optional
 
-from api.security import admin_auth, invalidate_auth_cache, jwt_auth, withdraw_auth
+from api.security import (
+    admin_auth,
+    invalidate_auth_cache,
+    jwt_auth,
+    manager_auth,
+    withdraw_auth,
+)
 from asgiref.sync import sync_to_async
 from common.outbound import SuccessResponse
 from django.conf import settings
 from django.contrib.auth import aauthenticate, get_user_model
+from django.db import IntegrityError
 from django.http import HttpResponseRedirect, JsonResponse
 from django.utils import timezone
 from ninja import Query, Router
@@ -30,6 +37,31 @@ User = get_user_model()
 router = Router(tags=["User"])
 
 
+async def _ensure_contact_available(email: str, phone_number: Optional[str]) -> None:
+    # email 중복 검사
+    if (
+        await User.objects.exclude(login_method=User.LoginMethodChoices.TOSS)
+        .filter(email=email, withdraw_at__isnull=True)
+        .aexists()
+    ):
+        raise HttpError(400, "이미 사용중인 이메일입니다.")
+    # social email 중복 검사
+    if (
+        await User.objects.exclude(login_method=User.LoginMethodChoices.TOSS)
+        .filter(social_email=email, withdraw_at__isnull=True)
+        .aexists()
+    ):
+        raise HttpError(400, "이미 사용중인 이메일입니다.")
+    # 전화 번호 중복 검사
+    if (
+        phone_number
+        and await User.objects.exclude(login_method=User.LoginMethodChoices.TOSS)
+        .filter(phone_number=phone_number, withdraw_at__isnull=True)
+        .aexists()
+    ):
+        raise HttpError(400, "이미 사용중인 전화번호입니다.")
+
+
 @router.post(
     "/signup",
     summary="[C] 회원가입",
@@ -37,27 +69,7 @@ router = Router(tags=["User"])
     response=response.UserTinyResponseSchema,
 )
 async def signup_api(request, data: schema.UserSignupSchema):
-    # email 중복 검사
-    if (
-        await User.objects.exclude(login_method=User.LoginMethodChoices.TOSS)
-        .filter(email=data.email, withdraw_at__isnull=True)
-        .aexists()
-    ):
-        raise HttpError(400, "이미 사용중인 이메일입니다.")
-    # social email 중복 검사
-    if (
-        await User.objects.exclude(login_method=User.LoginMethodChoices.TOSS)
-        .filter(social_email=data.email, withdraw_at__isnull=True)
-        .aexists()
-    ):
-        raise HttpError(400, "이미 사용중인 이메일입니다.")
-    # 전화 번호 중복 검사
-    if (
-        await User.objects.exclude(login_method=User.LoginMethodChoices.TOSS)
-        .filter(phone_number=data.phone_number, withdraw_at__isnull=True)
-        .aexists()
-    ):
-        raise HttpError(400, "이미 사용중인 전화번호입니다.")
+    await _ensure_contact_available(data.email, data.phone_number)
     data = data.dict()
     data.pop("password2")
 
@@ -78,6 +90,33 @@ async def signup_api(request, data: schema.UserSignupSchema):
         await sync_to_async(send_verification_email)(user)
 
     return user
+
+
+@router.post(
+    "/admin-signup",
+    summary="[A] 관리자/소유자 유저 등록",
+    description=(
+        "시스템 관리자 또는 워크스페이스 owner/admin이 계정을 대신 만듭니다. "
+        "전화번호 인증 해시는 받지 않고, 만든 계정은 이메일 인증 없이 바로 활성입니다. "
+        "워크스페이스에 넣으려면 이어서 `POST /api/v1/workspace/{workspace_id}/member`를 부릅니다."
+    ),
+    response={201: response.UserTinyResponseSchema},
+    auth=manager_auth,
+)
+async def admin_signup_api(request, data: schema.AdminUserSignupSchema):
+    await _ensure_contact_available(data.email, data.phone_number)
+    try:
+        user = await sync_to_async(User.objects.create_user)(
+            email=data.email,
+            password=data.password,
+            name=data.name,
+            phone_number=data.phone_number,
+            type=User.UserTypeChoices.MEMBER,
+            status=User.UserStatusChoice.ACTIVE,
+        )
+    except IntegrityError:
+        raise HttpError(400, "이미 사용중인 이메일입니다.")
+    return 201, user
 
 
 @router.post(

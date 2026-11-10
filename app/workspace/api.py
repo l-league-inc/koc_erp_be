@@ -26,6 +26,8 @@ from workspace.inbound import (
     ViewUpdateSchema,
     ViewWriteSchema,
     WorkspaceCreateSchema,
+    WorkspaceMemberCreateSchema,
+    WorkspaceMemberUpdateSchema,
     WorkspaceUpdateSchema,
 )
 from workspace.outbound import (
@@ -50,6 +52,7 @@ from workspace.outbound import (
     SearchResponseSchema,
     TrashRecordResponseSchema,
     ViewResponseSchema,
+    WorkspaceMemberDetailResponseSchema,
     WorkspaceMemberResponseSchema,
     WorkspaceResponseSchema,
 )
@@ -60,6 +63,12 @@ from workspace.comments import (
     set_block_comment_resolved,
 )
 from workspace.blocksync import sync_page_blocks
+from workspace.members import (
+    add_member,
+    list_member_details,
+    remove_member,
+    update_member_role,
+)
 from workspace.files import create_block_file_download, create_block_file_upload
 from workspace.revisions import (
     get_page_revision,
@@ -978,6 +987,65 @@ async def list_trash_api(request, workspace_id: int):
 )
 async def list_member_api(request, workspace_id: int):
     return await sync_to_async(list_members)(request.auth, workspace_id)
+
+
+@router.get(
+    "/{workspace_id}/member/manage",
+    summary="[A] 워크스페이스 멤버 관리 목록",
+    description="owner/admin이 멤버의 이름, 이메일, 전화번호, 계정 상태, 역할을 조회합니다.",
+    response=list[WorkspaceMemberDetailResponseSchema],
+    auth=jwt_auth,
+)
+async def list_member_manage_api(request, workspace_id: int):
+    return await sync_to_async(list_member_details)(request.auth, workspace_id)
+
+
+@router.post(
+    "/{workspace_id}/member",
+    summary="[A] 워크스페이스 멤버 등록",
+    description=(
+        "이미 가입한 유저를 user_id 또는 email로 워크스페이스에 넣습니다. "
+        "owner/admin만 부를 수 있고, admin/owner 역할은 owner만 줄 수 있습니다."
+    ),
+    response={201: WorkspaceMemberDetailResponseSchema},
+    auth=jwt_auth,
+)
+async def add_member_api(request, workspace_id: int, payload: WorkspaceMemberCreateSchema):
+    member = await sync_to_async(add_member)(request.auth, workspace_id, _dump(payload))
+    return 201, member
+
+
+@router.patch(
+    "/{workspace_id}/member/{user_id}",
+    summary="[A] 워크스페이스 멤버 역할 변경",
+    description=(
+        "멤버의 역할을 바꿉니다. admin/owner를 주거나 바꾸는 일은 owner만 할 수 있고, "
+        "마지막 owner는 바꿀 수 없습니다."
+    ),
+    response=WorkspaceMemberDetailResponseSchema,
+    auth=jwt_auth,
+)
+async def update_member_api(
+    request, workspace_id: int, user_id: int, payload: WorkspaceMemberUpdateSchema
+):
+    return await sync_to_async(update_member_role)(
+        request.auth, workspace_id, user_id, payload.role
+    )
+
+
+@router.delete(
+    "/{workspace_id}/member/{user_id}",
+    summary="[A] 워크스페이스 멤버 제외",
+    description=(
+        "멤버를 워크스페이스에서 내보냅니다. 계정은 그대로입니다. "
+        "admin/owner를 내보내는 일은 owner만 할 수 있고, 마지막 owner는 내보낼 수 없습니다."
+    ),
+    response={204: None},
+    auth=jwt_auth,
+)
+async def remove_member_api(request, workspace_id: int, user_id: int):
+    await sync_to_async(remove_member)(request.auth, workspace_id, user_id)
+    return 204, None
 
 
 @router.get(

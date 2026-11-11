@@ -89,6 +89,7 @@ LOCAL_APPS = [
     "workspace",
     "assistant",
     "document",
+    "mail",
 ]
 
 INSTALLED_APPS = CHANNEL_APPS + DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -256,6 +257,9 @@ CACHE_TTL_SHORT = 60 * 15  # 15분 — 광고 배너, 상품 목록
 # 토스 로그인 설정
 TOSS_DECRYPT_KEY = os.getenv("TOSS_DECRYPT_KEY", "")  # Base64로 인코딩된 AES 키
 TOSS_AAD = os.getenv("TOSS_AAD", "TOSS")  # Additional Authenticated Data
+
+# Daum 메일 앱 비밀번호 암호화 키 (Base64 인코딩된 32바이트). 비어 있으면 SECRET_KEY에서 유도합니다.
+MAIL_CREDENTIALS_KEY = os.getenv("MAIL_CREDENTIALS_KEY", "")
 TOSS_CALLBACK_BASIC_AUTH = os.getenv(
     "TOSS_CALLBACK_BASIC_AUTH", "BUDGET"
 )  # 콜백 Basic Auth 키

@@ -16,6 +16,7 @@ BUNDLED_NAMES = (
     "quote",
     "travel",
     "after_service",
+    "mail",
 )
 DESCRIPTION_LIMIT = 300
 BODY_LIMIT = 8000

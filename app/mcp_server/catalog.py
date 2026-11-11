@@ -78,6 +78,10 @@ PUBLIC_ENDPOINTS = frozenset(
         ("GET", "/api/v1/document/{workspace_id}/file/{file_id}"),
         ("GET", "/api/v1/document/{workspace_id}/file/{file_id}/mail"),
         ("POST", "/api/v1/document/{workspace_id}/file/{file_id}/download"),
+        ("GET", "/api/v1/mail/account"),
+        ("GET", "/api/v1/mail/messages"),
+        ("GET", "/api/v1/mail/messages/{uid}"),
+        ("POST", "/api/v1/mail/send"),
     }
 )
 OPEN_WORLD_POSTS = frozenset()

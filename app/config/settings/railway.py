@@ -267,6 +267,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = "gpt-4o-mini"
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
+# Daum 메일 자격증명 암호화 (Base64 32바이트). 비어 있으면 SECRET_KEY에서 유도합니다.
+MAIL_CREDENTIALS_KEY = os.getenv("MAIL_CREDENTIALS_KEY", "")
+
 # Sentry
 sentry_sdk.init(
     dsn=os.getenv("SENTRY_DSN"),

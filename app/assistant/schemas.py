@@ -84,10 +84,20 @@ class ConfirmedSkillSchema(Schema):
     name: str
 
 
+class ConfirmedMailSchema(Schema):
+    action_id: int
+    sender: str
+    to: list[str]
+    cc: list[str]
+    bcc: list[str]
+    subject: str
+
+
 class ConfirmResultSchema(Schema):
     proposed_actions: list[ProposedActionResponseSchema]
     records: list[ConfirmedRecordSchema]
     skills: list[ConfirmedSkillSchema]
+    mails: list[ConfirmedMailSchema] = []
 
 
 class SkillCreateSchema(Schema):

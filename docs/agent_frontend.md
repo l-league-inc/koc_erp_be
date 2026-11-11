@@ -5,11 +5,11 @@ audience: frontend
 
 # 업무 대화 API
 
-홈 입력창과 출근, 일정, 견적, 출장, A/S 단축은 같은 API를 씁니다. 단축도 같은 대화로 들어가고, 서버가 고정 스킬을 골라 처리합니다. 인증은 기존 JWT입니다.
+홈 입력창과 출근, 일정, 견적, 출장, A/S, 메일 단축은 같은 API를 씁니다. 단축도 같은 대화로 들어가고, 서버가 고정 스킬을 골라 처리합니다. 인증은 기존 JWT입니다.
 
-모델 호출은 서버가 합니다. 사용자는 OpenAI 3개와 Anthropic 3개 중에서 고르고, 그 선택은 업무 대화와 워크봇 초안에 함께 쓰입니다. 프롬프트에는 스킬 이름과 설명만 들어가고, 맞는 스킬의 절차는 그때 읽습니다. 레코드와 스킬의 생성·수정은 초안으로 돌아오고, 사용자가 확정한 뒤에만 저장됩니다.
+모델 호출은 서버가 합니다. 사용자는 OpenAI 3개와 Anthropic 3개 중에서 고르고, 그 선택은 업무 대화와 워크봇 초안에 함께 쓰입니다. 프롬프트에는 스킬 이름과 설명만 들어가고, 맞는 스킬의 절차는 그때 읽습니다. 레코드와 스킬의 생성·수정, 메일 발송은 초안으로 돌아오고, 사용자가 확정한 뒤에만 저장·발송됩니다.
 
-고정 스킬이 만드는 레코드 초안의 `database_slug`는 출근 `attendance`, 일정 `tasks`, 견적 `quotes`, 출장 `trip`, A/S `after_service`입니다. 임직원·거래처 칸은 그 레코드 id 배열입니다. 대화 `database_slug`가 한 영역이면 조회는 그 영역의 관계 대상까지 되고, 생성 초안은 그 영역만 됩니다.
+고정 스킬이 만드는 레코드 초안의 `database_slug`는 출근 `attendance`, 일정 `tasks`, 견적 `quotes`, 출장 `trip`, A/S `after_service`입니다. 메일 고정 스킬 이름은 `mail`이며 레코드가 아니라 Daum 메일을 읽고 발송 초안을 만듭니다. 임직원·거래처 칸은 그 레코드 id 배열입니다. 대화 `database_slug`가 한 영역이면 조회는 그 영역의 관계 대상까지 되고, 생성 초안은 그 영역만 됩니다.
 
 ## 유저 플로우
 
@@ -20,7 +20,7 @@ audience: frontend
 5. `POST /api/v1/agent/session/{session_id}/message`에 사용자 문장을 보냅니다. 이번 문장만 다른 모델을 쓰려면 `model`을 함께 보냅니다. 비우면 저장된 선택을 씁니다.
 6. 응답 `proposed_actions`가 비어 있으면 안내 문장만 보여 줍니다.
 7. 초안이 있으면 내용을 보여주고, 확인 후 `POST /api/v1/agent/session/{session_id}/confirm`에 `action_ids`를 보냅니다.
-8. 확정 응답의 `records`로 만들어진 행을 엽니다. 스킬 초안이면 `skills`의 `name`으로 스킬 목록을 다시 불러옵니다.
+8. 확정 응답의 `records`로 만들어진 행을 엽니다. 스킬 초안이면 `skills`의 `name`으로 스킬 목록을 다시 불러옵니다. 메일 발송 초안이면 `mails`로 발송 결과를 보여 줍니다.
 
 ## API
 
@@ -60,11 +60,13 @@ audience: frontend
 {"action_ids": [1]}
 ```
 
-초안 `kind`는 `create_record`, `update_record`, `create_skill`, `update_skill`입니다. 레코드 `payload`는 워크스페이스 레코드 생성·수정과 같은 쓰기 모양이고, 생성은 `database_slug`를 포함합니다. 관계 값은 레코드 id 배열입니다. 서버가 조회 도구로 읽는 관계 값은 `{id, title, database_id, database_slug}`이지만, 이 조회 결과는 화면 초안에 실리지 않습니다. 확정 뒤 레코드를 다시 조회하면 읽기 모양이 나옵니다. 페이지 데이터베이스의 임직원·거래처 칸도 레코드 id 배열입니다. `seed_koc_workspace` 여섯 영역의 `owner`만 `GET /api/v1/workspace/{workspace_id}/member`의 `user_id` 배열입니다.
+초안 `kind`는 `create_record`, `update_record`, `create_skill`, `update_skill`, `send_mail`입니다. 레코드 `payload`는 워크스페이스 레코드 생성·수정과 같은 쓰기 모양이고, 생성은 `database_slug`를 포함합니다. 관계 값은 레코드 id 배열입니다. 서버가 조회 도구로 읽는 관계 값은 `{id, title, database_id, database_slug}`이지만, 이 조회 결과는 화면 초안에 실리지 않습니다. 확정 뒤 레코드를 다시 조회하면 읽기 모양이 나옵니다. 페이지 데이터베이스의 임직원·거래처 칸도 레코드 id 배열입니다. `seed_koc_workspace` 여섯 영역의 `owner`만 `GET /api/v1/workspace/{workspace_id}/member`의 `user_id` 배열입니다.
 
-스킬 생성 `payload`는 `name`, `description`, `body`, `enabled`입니다. 수정 `payload`는 `name`과 바뀐 `description`, `body`, `enabled`입니다. `name`은 영문 소문자로 시작하고 숫자와 `_`만 씁니다. 고정 스킬 이름 `attendance`, `schedule`, `quote`, `travel`, `after_service`는 만들거나 고칠 수 없습니다.
+스킬 생성 `payload`는 `name`, `description`, `body`, `enabled`입니다. 수정 `payload`는 `name`과 바뀐 `description`, `body`, `enabled`입니다. `name`은 영문 소문자로 시작하고 숫자와 `_`만 씁니다. 고정 스킬 이름 `attendance`, `schedule`, `quote`, `travel`, `after_service`, `mail`는 만들거나 고칠 수 없습니다.
 
-대화 목록 항목은 `id`, `workspace_id`, `database_slug`, `preview`, `created_at`, `updated_at`입니다. 상세는 여기에 `messages`, `proposed_actions`가 있습니다. 메시지는 `id`, `role`(`user`/`assistant`), `content`, `created_at`입니다. 초안은 `id`, `kind`, `status`(`pending`/`confirmed`/`rejected`), `payload`, `result`입니다. 메시지 전송 응답은 `message`, `proposed_actions`입니다. 확정 응답은 `proposed_actions`, `records`, `skills`입니다. `records` 항목은 `action_id`, `record_id`, `database_id`, `title`입니다. `database_id`로 해당 데이터베이스의 레코드 목록 캐시만 무효화할 수 있습니다. `skills` 항목은 `action_id`, `skill_id`, `name`입니다. 레코드 초안만 확정하면 `skills`는 빈 배열입니다.
+메일 발송 `payload`는 `to`(이메일 배열), `subject`, `body`이고, 선택으로 `cc`, `bcc`입니다. 메일 계정 연결은 `/api/v1/mail`을 씁니다.
+
+대화 목록 항목은 `id`, `workspace_id`, `database_slug`, `preview`, `created_at`, `updated_at`입니다. 상세는 여기에 `messages`, `proposed_actions`가 있습니다. 메시지는 `id`, `role`(`user`/`assistant`), `content`, `created_at`입니다. 초안은 `id`, `kind`, `status`(`pending`/`confirmed`/`rejected`), `payload`, `result`입니다. 메시지 전송 응답은 `message`, `proposed_actions`입니다. 확정 응답은 `proposed_actions`, `records`, `skills`, `mails`입니다. `records` 항목은 `action_id`, `record_id`, `database_id`, `title`입니다. `database_id`로 해당 데이터베이스의 레코드 목록 캐시만 무효화할 수 있습니다. `skills` 항목은 `action_id`, `skill_id`, `name`입니다. `mails` 항목은 `action_id`, `sender`, `to`, `cc`, `bcc`, `subject`입니다. 해당 종류가 없으면 빈 배열입니다.
 
 스킬 목록 항목은 `id`, `workspace_id`, `name`, `description`, `body`, `source`(`bundled`/`user`), `enabled`, `created_at`, `updated_at`입니다. 고정 스킬은 `enabled`가 true이고 시각은 `null`입니다. 생성 본문은 `workspace_id`, `name`, `description`, `body`, `enabled`입니다.
 
@@ -78,7 +80,7 @@ audience: frontend
 - 같은 `session_id`로 이어서 보내고, 재진입 때는 상세 조회로 메시지를 복원한다.
 - 대화 삭제는 `DELETE /session/{session_id}`만 호출하고, 204이면 목록에서 뺀다.
 - `proposed_actions`가 `pending`일 때만 확정 버튼을 띄운다.
-- 확정에 성공하면 해당 영역의 표 조회를 다시 불러온다. 스킬 초안이면 스킬 목록을 다시 불러온다.
+- 확정에 성공하면 해당 영역의 표 조회를 다시 불러온다. 스킬 초안이면 스킬 목록을 다시 불러온다. 메일 발송 초안이면 `mails` 결과를 보여 준다.
 - 고정 스킬은 목록에만 보여주고 수정·삭제 버튼을 만들지 않는다. `id`가 `null`이다.
 
 ## 비범위

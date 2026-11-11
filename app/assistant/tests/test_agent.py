@@ -472,3 +472,55 @@ class AgentApiTests(TestCase):
         self.assertEqual(period["start"], "2026-11-04")
         self.assertEqual(period["end"], "2026-11-06")
         self.assertNotIn("end_date", action["payload"]["values"])
+
+    async def test_mail_bundled_skill_and_send_confirm(self):
+        workspace_id = await self._workspace_id()
+        listed = await self.client.get(
+            f"/skill?workspace_id={workspace_id}",
+            headers=self.headers(),
+        )
+        self.assertEqual(listed.status_code, 200, listed.json())
+        mail_skill = next(item for item in listed.json() if item["name"] == "mail")
+        self.assertEqual(mail_skill["source"], "bundled")
+        self.assertIsNone(mail_skill["id"])
+
+        session = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id},
+            headers=self.headers(),
+        )
+        session_id = session.json()["id"]
+        stored = await sync_to_async(AgentSession.objects.get)(id=session_id)
+        action = await sync_to_async(_dispatch)(
+            stored,
+            self.user,
+            "propose_send_mail",
+            {
+                "to": ["client@example.com"],
+                "subject": "회신",
+                "body": "확인했습니다.",
+            },
+            [],
+        )
+        self.assertEqual(action["kind"], "send_mail")
+
+        with patch(
+            "assistant.agent.mail_service.send_message",
+            return_value={
+                "sender": "owner@daum.net",
+                "to": ["client@example.com"],
+                "cc": [],
+                "bcc": [],
+                "subject": "회신",
+            },
+        ) as sent:
+            confirmed = await self.client.post(
+                f"/session/{session_id}/confirm",
+                json={"action_ids": [action["id"]]},
+                headers=self.headers(),
+            )
+        self.assertEqual(confirmed.status_code, 200, confirmed.json())
+        self.assertEqual(confirmed.json()["records"], [])
+        self.assertEqual(confirmed.json()["skills"], [])
+        self.assertEqual(confirmed.json()["mails"][0]["subject"], "회신")
+        sent.assert_called_once()

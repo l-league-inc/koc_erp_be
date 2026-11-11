@@ -12,6 +12,7 @@ from assistant import llm, skillbook
 from assistant.models import AgentMessage, AgentSession, ProposedAction
 from workspace.models import Property, RecordActivity
 from document.utils import get_file_detail, search_files
+from mail import service as mail_service
 from workspace.utils import (
     accessible_databases,
     create_record,
@@ -185,6 +186,57 @@ _TOOLS = [
                 "type": "object",
                 "properties": {"file_id": {"type": "integer"}},
                 "required": ["file_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_mails",
+            "description": "연결된 Daum 메일 목록을 조회합니다. 저장하거나 발송하지 않습니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "folder": {"type": "string"},
+                    "limit": {"type": "integer"},
+                    "unread_only": {"type": "boolean"},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_mail",
+            "description": "메일 본문을 조회합니다. 저장하거나 발송하지 않습니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "uid": {"type": "string"},
+                    "folder": {"type": "string"},
+                },
+                "required": ["uid"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_send_mail",
+            "description": "메일 발송 초안을 만듭니다. 사용자가 확정하기 전에는 발송하지 않습니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "array", "items": {"type": "string"}},
+                    "subject": {"type": "string"},
+                    "body": {"type": "string"},
+                    "cc": {"type": "array", "items": {"type": "string"}},
+                    "bcc": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["to", "subject", "body"],
                 "additionalProperties": False,
             },
         },
@@ -373,7 +425,9 @@ def _system_prompt(session: AgentSession, user) -> str:
         "사용자 문장이 설명과 맞으면 view_skill로 전문을 읽고 그 절차를 따릅니다. "
         "레코드나 스킬을 만들거나 고칠 때는 propose 도구만 사용하고, 저장이 끝났다고 말하지 않습니다. "
         "회사 문서는 search_documents로 찾고 get_document로 본문을 읽습니다. "
-        "개인 문서는 이 사용자 것만 나옵니다.\n"
+        "개인 문서는 이 사용자 것만 나옵니다. "
+        "메일은 list_mails와 get_mail로 읽고, 보낼 때는 propose_send_mail만 씁니다. "
+        "발송이 끝났다고 말하지 않습니다.\n"
         f"{catalog}"
     )
 
@@ -466,6 +520,58 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
         return search_files(user, session.workspace_id, str(arguments.get("q") or ""))
     if name == "get_document":
         return get_file_detail(user, session.workspace_id, int(arguments["file_id"]))
+    if name == "list_mails":
+        limit = arguments.get("limit")
+        return mail_service.list_messages(
+            user,
+            folder=str(arguments.get("folder") or "INBOX"),
+            limit=int(limit) if limit is not None else 20,
+            unread_only=bool(arguments.get("unread_only")),
+        )
+    if name == "get_mail":
+        uid = str(arguments.get("uid") or "").strip()
+        if not uid:
+            raise HttpError(400, "메일 uid가 필요합니다.")
+        return mail_service.get_message(
+            user,
+            uid,
+            folder=str(arguments.get("folder") or "INBOX"),
+        )
+    if name == "propose_send_mail":
+        to_raw = arguments.get("to") or []
+        if not isinstance(to_raw, list) or not to_raw:
+            raise HttpError(400, "받는 사람이 필요합니다.")
+        to_list = [str(item).strip() for item in to_raw if str(item).strip()]
+        if not to_list:
+            raise HttpError(400, "받는 사람이 필요합니다.")
+        subject = str(arguments.get("subject") or "").strip()
+        body = str(arguments.get("body") or "")
+        if not subject:
+            raise HttpError(400, "제목이 필요합니다.")
+        mail_payload: dict[str, Any] = {
+            "to": to_list,
+            "subject": subject,
+            "body": body,
+        }
+        if arguments.get("cc") is not None:
+            if not isinstance(arguments["cc"], list):
+                raise HttpError(400, "cc는 배열이어야 합니다.")
+            mail_payload["cc"] = [
+                str(item).strip() for item in arguments["cc"] if str(item).strip()
+            ]
+        if arguments.get("bcc") is not None:
+            if not isinstance(arguments["bcc"], list):
+                raise HttpError(400, "bcc는 배열이어야 합니다.")
+            mail_payload["bcc"] = [
+                str(item).strip() for item in arguments["bcc"] if str(item).strip()
+            ]
+        action = ProposedAction.objects.create(
+            session=session,
+            kind=ProposedAction.Kind.SEND_MAIL,
+            payload=mail_payload,
+        )
+        created.append(action.id)
+        return serialize_action(action)
     if name == "propose_update_skill":
         action = ProposedAction.objects.create(
             session=session,
@@ -550,6 +656,7 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
         raise HttpError(404, "확정할 초안을 찾을 수 없습니다.")
     records = []
     skills = []
+    mails = []
     for action in actions:
         payload = action.payload or {}
         if action.kind == ProposedAction.Kind.CREATE_RECORD:
@@ -601,6 +708,17 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
             skills.append(
                 {"action_id": action.id, "skill_id": saved["id"], "name": saved["name"]}
             )
+        elif action.kind == ProposedAction.Kind.SEND_MAIL:
+            sent = mail_service.send_message(
+                user,
+                to=list(payload.get("to") or []),
+                subject=str(payload.get("subject") or ""),
+                body=str(payload.get("body") or ""),
+                cc=list(payload.get("cc") or []),
+                bcc=list(payload.get("bcc") or []),
+            )
+            action.result = sent
+            mails.append({"action_id": action.id, **sent})
         else:
             raise HttpError(400, "지원하지 않는 초안입니다.")
         action.status = ProposedAction.Status.CONFIRMED
@@ -610,4 +728,5 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
         "proposed_actions": [serialize_action(action) for action in actions],
         "records": records,
         "skills": skills,
+        "mails": mails,
     }

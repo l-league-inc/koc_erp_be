@@ -58,6 +58,7 @@ class ProposedAction(CommonModel):
         UPDATE_RECORD = ("update_record", "레코드 수정")
         CREATE_SKILL = ("create_skill", "스킬 생성")
         UPDATE_SKILL = ("update_skill", "스킬 수정")
+        SEND_MAIL = ("send_mail", "메일 발송")
 
     class Status(models.TextChoices):
         PENDING = ("pending", "대기")

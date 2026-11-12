@@ -15,6 +15,7 @@ ALLOWED_HOSTS = [
     "dev.api.koc-erp.co.kr",
     "api.koc-erp.co.kr",
     "kocerpbe-dev.up.railway.app",
+    "kocerpbe-main.up.railway.app",
     ".railway.app",
 ]
 
@@ -115,12 +116,10 @@ CHANNEL_LAYERS = {
 # cors & csrf
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
-if DJANGO_ENV_NAME in ["main"]:
-    SESSION_COOKIE_SAMESITE = "Lax"
-    CSRF_COOKIE_SAMESITE = "Lax"
-else:
-    SESSION_COOKIE_SAMESITE = "None"
-    CSRF_COOKIE_SAMESITE = "None"
+# 임시: main도 railway.app 교차 출처를 쓰므로 SameSite=None.
+# api.koc-erp.co.kr 복구 후 main은 Lax로 되돌린다.
+SESSION_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SAMESITE = "None"
 
 # CORS
 CORS_ALLOW_CREDENTIALS = True
@@ -137,10 +136,9 @@ CORS_ORIGIN_WHITELIST = [
     "https://dev.api.koc-erp.co.kr",  # Backend Domain URI
     "https://api.koc-erp.co.kr",  # Backend Domain URI
     "https://kocerpbe-dev.up.railway.app",  # Dev temporary API
+    "https://kocerpbe-main.up.railway.app",  # Main temporary API
     "https://dev.d4ay0e6oi9l0f.amplifyapp.com",  # Amplify URI
     "https://koc-erp-fe.vercel.app",  # Vercel URI
-    "https://*.railway.app",
-    "http://*.railway.app",
     "https://koc-erp.apps.tossmini.com",  # Toss mini app URI
     "https://koc-erp.private-apps.tossmini.com",  # Toss mini private app URI
     "https://apps-in-toss.toss.im",  # Toss mini 개발자 앱 URI
@@ -149,6 +147,7 @@ CORS_ORIGIN_WHITELIST = [
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^http://192\.168\.45\.\d{1,3}:5173$",  # 192.168.45.x:5173 패턴
     r"^http://192\.168\.0\.\d{1,3}:5173$",  # 192.168.0.x:5173 패턴
+    r"^https://[\w-]+\.up\.railway\.app$",  # Railway temporary API/FE
 ]
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",  # React app URI
@@ -163,10 +162,9 @@ CSRF_TRUSTED_ORIGINS = [
     "https://dev.api.koc-erp.co.kr",  # Backend Domain URI
     "https://api.koc-erp.co.kr",  # Backend Domain URI
     "https://kocerpbe-dev.up.railway.app",  # Dev temporary API
+    "https://kocerpbe-main.up.railway.app",  # Main temporary API
     "https://dev.d4ay0e6oi9l0f.amplifyapp.com",  # Amplify URI
     "https://koc-erp-fe.vercel.app",  # Vercel URI
-    "https://*.railway.app",
-    "http://*.railway.app",
     "https://koc-erp.apps.tossmini.com",  # Toss mini app URI
     "https://koc-erp.private-apps.tossmini.com",  # Toss mini private app URI
     "https://apps-in-toss.toss.im",  # Toss mini 개발자 앱 URI
@@ -174,12 +172,18 @@ CSRF_TRUSTED_ORIGINS = [
 
 # URL settings
 if DJANGO_ENV_NAME == "main":
-    BASE_URL = "https://api.koc-erp.co.kr"
-    SERVER_DOMAIN_NAME = "https://api.koc-erp.co.kr"
+    # 임시: api.koc-erp.co.kr 대신 Railway main 도메인 사용.
+    # 복구 후 BASE_URL/SERVER_DOMAIN_NAME을 https://api.koc-erp.co.kr 로,
+    # SESSION/CSRF_COOKIE_DOMAIN을 .koc-erp.co.kr 로 되돌린다.
+    BASE_URL = "https://kocerpbe-main.up.railway.app"
+    SERVER_DOMAIN_NAME = BASE_URL
     KAKAO_LOGIN_DOMAIN = "https://www.koc-erp.co.kr"
     FRONTEND_URL = "https://www.koc-erp.co.kr"
-    SESSION_COOKIE_DOMAIN = ".koc-erp.co.kr"
-    CSRF_COOKIE_DOMAIN = ".koc-erp.co.kr"
+    # railway.app 응답에는 .koc-erp.co.kr 쿠키를 심을 수 없다.
+    SESSION_COOKIE_DOMAIN = None
+    CSRF_COOKIE_DOMAIN = None
+    if not os.getenv("MCP_RESOURCE_URL"):
+        MCP_RESOURCE_URL = f"{BASE_URL}/mcp"
 elif DJANGO_ENV_NAME == "dev":
     BASE_URL = "https://kocerpbe-dev.up.railway.app"
     SERVER_DOMAIN_NAME = BASE_URL

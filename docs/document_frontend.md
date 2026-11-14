@@ -41,7 +41,7 @@ audience: frontend
 
 파일 항목은 `id`, `workspace_id`, `space_id`, `space_kind`, `folder_id`, `original_filename`, `content_type`, `size`, `uploaded_by_id`, `path`, `index_status`, `index_source`, `description_ko`, `tags_ko`, `created_at`, `updated_at`입니다. 상세만 `extracted_text`, `error`가 있습니다.
 
-`index_status`는 `pending`, `processing`, `ready`, `failed`, `skipped`입니다. `index_source`는 `local` 또는 `llm`입니다. 공유 문서는 요약에 언어 모델을 쓰고, 개인 문서는 본문 추출만 합니다. PDF, DOCX, txt, md, csv만 추출합니다.
+`index_status`는 `pending`, `processing`, `ready`, `failed`, `skipped`입니다. `index_source`는 `local` 또는 `llm`입니다. 공유 문서함의 PDF, DOCX, txt, md, csv는 본문을 추출한 뒤 언어 모델로 요약합니다. 공유 문서함의 이미지는 장면을 설명하고, 영상은 중간 장면을 설명하고, 오디오는 앞부분을 전사한 뒤 요약합니다. 개인 문서함은 본문을 추출할 수 있는 파일만 저장하고 언어 모델을 호출하지 않습니다. 그 외 형식은 `skipped`입니다.
 
 검색 항목은 `id`, `original_filename`, `folder_id`, `folder_path`, `description_ko`, `score`입니다. 공유 문서와 내 개인 문서만 나옵니다.
 
@@ -65,5 +65,6 @@ audience: frontend
 - 메일 첨부 발송
 - 개인 문서를 공유 문서함으로 옮기기
 - 폴더별 추가 공유 대상
-- hwp, 이미지 설명, 음성 전사
+- hwp, xls, ppt
+- 개인 문서함의 이미지 설명과 음성 전사
 - 기존 `company_docs` Google Drive 링크 데이터베이스 교체

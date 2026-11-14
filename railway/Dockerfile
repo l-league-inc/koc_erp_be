@@ -5,6 +5,10 @@ ENV POETRY_VERSION=1.8.2
 
 RUN echo "koc erp backend railway django container. 2026.10.29 13:30 release"
 
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /home/koc_erp_be/
 
 ARG DJANGO_ENV_NAME

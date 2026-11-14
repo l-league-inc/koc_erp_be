@@ -75,16 +75,75 @@ class DocumentIndexTests(TestCase):
         self.assertEqual(index.description_ko, "연차 요약")
         self.assertEqual(index.tags_ko, "연차,규정")
 
-    def test_unsupported_file_is_skipped(self):
+    def test_unknown_file_is_skipped(self):
+        file_id = self._register(self.shared_root, "archive.zip", "application/zip")
+        with (
+            patch("document.indexer.download_to_temp", return_value="/tmp/missing-archive.zip"),
+            patch("document.indexer._describe_image") as describe,
+        ):
+            build_index(file_id)
+        describe.assert_not_called()
+        index = DocumentIndex.objects.get(file_id=file_id)
+        self.assertEqual(index.index_status, DocumentIndex.Status.SKIPPED)
+
+    def test_shared_image_uses_vision(self):
         file_id = self._register(self.shared_root, "photo.png", "image/png")
         with (
             patch("document.indexer.download_to_temp", return_value="/tmp/missing-photo.png"),
-            patch("document.indexer.summarize") as summarize,
+            patch("document.indexer._describe_image", return_value=("현장 사진입니다", "현장,사진")),
         ):
             build_index(file_id)
-        summarize.assert_not_called()
+        index = DocumentIndex.objects.get(file_id=file_id)
+        self.assertEqual(index.index_status, DocumentIndex.Status.READY)
+        self.assertEqual(index.index_source, DocumentIndex.Source.LLM)
+        self.assertEqual(index.description_ko, "현장 사진입니다")
+        self.assertIn("현장", index.extracted_text)
+
+    def test_personal_image_stays_skipped(self):
+        file_id = self._register(self.personal_root, "private.png", "image/png")
+        with (
+            patch("document.indexer.download_to_temp", return_value="/tmp/missing-private.png"),
+            patch("document.indexer._describe_image") as describe,
+        ):
+            build_index(file_id)
+        describe.assert_not_called()
         index = DocumentIndex.objects.get(file_id=file_id)
         self.assertEqual(index.index_status, DocumentIndex.Status.SKIPPED)
+        self.assertEqual(index.index_source, DocumentIndex.Source.LOCAL)
+
+    def test_shared_audio_transcribes_then_summarizes(self):
+        file_id = self._register(self.shared_root, "meeting.mp3", "audio/mpeg")
+        with (
+            patch("document.indexer.download_to_temp", return_value="/tmp/missing-meeting.mp3"),
+            patch("document.indexer._extract_audio_sample", return_value="/tmp/missing-sample.mp3"),
+            patch("document.indexer._transcribe_with_whisper", return_value="회의에서 연차 규정을 설명했습니다"),
+            patch("document.indexer.summarize", return_value=("연차 회의", "연차,회의")) as summarize,
+        ):
+            build_index(file_id)
+        summarize.assert_called_once()
+        index = DocumentIndex.objects.get(file_id=file_id)
+        self.assertEqual(index.index_status, DocumentIndex.Status.READY)
+        self.assertEqual(index.index_source, DocumentIndex.Source.LLM)
+        self.assertEqual(index.description_ko, "연차 회의")
+        self.assertIn("연차 규정", index.extracted_text)
+
+    def test_shared_video_merges_frames(self):
+        file_id = self._register(self.shared_root, "visit.mp4", "video/mp4")
+        with (
+            patch("document.indexer.download_to_temp", return_value="/tmp/missing-visit.mp4"),
+            patch("document.indexer._extract_video_frames", return_value=["/tmp/frame-a.jpg", "/tmp/frame-b.jpg"]),
+            patch(
+                "document.indexer._describe_image",
+                side_effect=[("첫째 현장입니다", "회의,현장"), ("둘째 장면입니다", "현장,사람")],
+            ),
+            patch("document.indexer.time.sleep") as sleep,
+        ):
+            build_index(file_id)
+        sleep.assert_called_once_with(5)
+        index = DocumentIndex.objects.get(file_id=file_id)
+        self.assertEqual(index.description_ko, "첫째 현장입니다")
+        self.assertEqual(index.tags_ko, "회의,현장,사람")
+        self.assertIn("둘째", index.extracted_text)
 
     def test_extract_reads_text_file(self):
         from document.indexer import extract_text

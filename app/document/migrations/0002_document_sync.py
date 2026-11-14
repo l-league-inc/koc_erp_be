@@ -1,7 +1,7 @@
 import django.db.models.deletion
 from django.db import migrations, models
 
-import document.names
+from document.names import allocate_unique_name
 
 
 def _rename_duplicates(apps, schema_editor):
@@ -18,7 +18,7 @@ def _rename_duplicates(apps, schema_editor):
     for folder in folders:
         key = (folder.space_id, folder.parent_id)
         taken = taken_folders.setdefault(key, set())
-        renamed = document.names.allocate_unique_name(folder.name, taken, fallback="folder")
+        renamed = allocate_unique_name(folder.name, taken, fallback="folder")
         if renamed != folder.name:
             folder.name = renamed
             folder.save(update_fields=["name"])
@@ -27,17 +27,17 @@ def _rename_duplicates(apps, schema_editor):
         DocumentFile.objects.filter(deleted_at__isnull=True).order_by("folder_id", "id")
     )
     taken_files: dict[int, set[str]] = {}
-    for document in files:
-        taken = taken_files.setdefault(document.folder_id, set())
-        renamed = document.names.allocate_unique_name(
-            document.original_filename,
+    for stored_file in files:
+        taken = taken_files.setdefault(stored_file.folder_id, set())
+        renamed = allocate_unique_name(
+            stored_file.original_filename,
             taken,
             fallback="file",
         )
-        if renamed != document.original_filename:
-            document.original_filename = renamed
-            document.save(update_fields=["original_filename"])
-            DocumentIndex.objects.filter(file_id=document.id).update(filename=renamed)
+        if renamed != stored_file.original_filename:
+            stored_file.original_filename = renamed
+            stored_file.save(update_fields=["original_filename"])
+            DocumentIndex.objects.filter(file_id=stored_file.id).update(filename=renamed)
 
 
 class Migration(migrations.Migration):

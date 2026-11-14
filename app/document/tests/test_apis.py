@@ -1,12 +1,16 @@
+import importlib
 from unittest.mock import patch
 
 from asgiref.sync import sync_to_async
+from django.apps import apps
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from ninja.testing import TestAsyncClient
 
 from document.api import router
+
+_rename_duplicates = importlib.import_module("document.migrations.0002_document_sync")._rename_duplicates
 from document.models import DocumentChange, DocumentDownload, DocumentFile, DocumentMailLog
 from document.storage import document_prefix
 from user.utils import get_access_token
@@ -444,6 +448,7 @@ class DocumentApiTests(TestCase):
             headers=self.headers(self.member),
         )
         self.assertEqual(reserved.status_code, 400)
+        await sync_to_async(_rename_duplicates)(apps, None)
 
     async def test_sync_replace_cursor_and_changes(self):
         spaces = await self._spaces(self.member)

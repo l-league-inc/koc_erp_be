@@ -3,6 +3,9 @@
 
 ### Django ###
 *.log
+clients/**/bin/
+clients/**/obj/
+clients/koc-drive/dist/
 *.pot
 *.pyc
 __pycache__/

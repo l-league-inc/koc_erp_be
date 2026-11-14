@@ -5,12 +5,15 @@ from ninja.errors import HttpError
 from api.security import jwt_auth
 from document.inbound import (
     FileCreateSchema,
-    FileMoveSchema,
+    FileReplaceSchema,
+    FileReplaceUploadSchema,
+    FileUpdateSchema,
     FolderCreateSchema,
     FolderUpdateSchema,
     UploadRequestSchema,
 )
 from document.outbound import (
+    ChangeListResponseSchema,
     DownloadResponseSchema,
     FileDetailResponseSchema,
     FileResponseSchema,
@@ -18,6 +21,7 @@ from document.outbound import (
     MailLogResponseSchema,
     SearchHitSchema,
     SpaceResponseSchema,
+    SyncCursorResponseSchema,
     UploadResponseSchema,
 )
 from document.utils import (
@@ -25,17 +29,22 @@ from document.utils import (
     create_download,
     create_file,
     create_folder,
+    create_replace_upload,
+    create_sync_url,
     create_upload,
     delete_file,
     delete_folder,
     ensure_spaces,
     get_file_detail,
+    list_changes,
     list_files,
     list_folders,
     list_mail_logs,
-    move_file,
     reindex_file,
+    replace_file_content,
     search_files,
+    sync_cursor,
+    update_file,
     update_folder,
 )
 
@@ -55,6 +64,28 @@ def _dump(payload, *, exclude_unset: bool = False) -> dict:
 )
 async def list_space_api(request, workspace_id: int):
     return await sync_to_async(ensure_spaces)(request.auth, workspace_id)
+
+
+@router.get(
+    "/{workspace_id}/sync-cursor",
+    summary="[C] 문서 동기화 커서",
+    description="문서함의 현재 변경 커서를 조회합니다. 최초 동기화는 이 값을 받은 뒤 폴더와 파일 목록으로 트리를 만듭니다.",
+    response=SyncCursorResponseSchema,
+    auth=jwt_auth,
+)
+async def sync_cursor_api(request, workspace_id: int, space_id: int):
+    return await sync_to_async(sync_cursor)(request.auth, workspace_id, space_id)
+
+
+@router.get(
+    "/{workspace_id}/changes",
+    summary="[C] 문서 변경 목록",
+    description="커서 이후에 생긴 폴더·파일 변경을 최대 200건 반환합니다. 더 있으면 next_cursor로 이어서 조회합니다.",
+    response=ChangeListResponseSchema,
+    auth=jwt_auth,
+)
+async def list_changes_api(request, workspace_id: int, space_id: int, cursor: int = 0):
+    return await sync_to_async(list_changes)(request.auth, workspace_id, space_id, cursor)
 
 
 @router.get(
@@ -180,6 +211,62 @@ async def create_download_api(request, workspace_id: int, file_id: int):
 
 
 @router.post(
+    "/{workspace_id}/file/{file_id}/sync-url",
+    summary="[C] 동기화 다운로드 URL",
+    description="동기화 클라이언트가 파일 내용을 받기 위한 URL을 만듭니다. 다운로드 이력은 남기지 않습니다.",
+    response=DownloadResponseSchema,
+    auth=jwt_auth,
+)
+async def create_sync_url_api(request, workspace_id: int, file_id: int):
+    return await sync_to_async(create_sync_url)(request.auth, workspace_id, file_id)
+
+
+@router.post(
+    "/{workspace_id}/file/{file_id}/upload",
+    summary="[C] 문서 내용 교체 URL",
+    description="기존 문서의 새 내용을 올리기 위한 URL을 만듭니다. base_hash가 현재 해시와 다르면 409입니다.",
+    response=UploadResponseSchema,
+    auth=jwt_auth,
+)
+async def create_replace_upload_api(
+    request,
+    workspace_id: int,
+    file_id: int,
+    payload: FileReplaceUploadSchema,
+):
+    data = _dump(payload)
+    return await sync_to_async(create_replace_upload)(
+        request.auth,
+        workspace_id,
+        file_id,
+        data["content_type"],
+        data["size"],
+        data["base_hash"],
+    )
+
+
+@router.post(
+    "/{workspace_id}/file/{file_id}/content",
+    summary="[C] 문서 내용 교체 확정",
+    description="업로드가 끝난 새 내용으로 문서를 바꿉니다. base_hash가 현재 해시와 다르면 409입니다.",
+    response=FileDetailResponseSchema,
+    auth=jwt_auth,
+)
+async def replace_file_content_api(
+    request,
+    workspace_id: int,
+    file_id: int,
+    payload: FileReplaceSchema,
+):
+    return await sync_to_async(replace_file_content)(
+        request.auth,
+        workspace_id,
+        file_id,
+        _dump(payload),
+    )
+
+
+@router.post(
     "/{workspace_id}/file/{file_id}/reindex",
     summary="[C] 문서 색인 다시 실행",
     description="올린 사람이 문서 색인을 다시 실행합니다.",
@@ -203,14 +290,16 @@ async def get_file_api(request, workspace_id: int, file_id: int):
 
 @router.patch(
     "/{workspace_id}/file/{file_id}",
-    summary="[C] 문서 폴더 이동",
-    description="문서를 같은 문서함의 다른 폴더로 옮깁니다.",
+    summary="[C] 문서 수정",
+    description="문서 이름을 바꾸거나 같은 문서함의 다른 폴더로 옮깁니다.",
     response=FileResponseSchema,
     auth=jwt_auth,
 )
-async def move_file_api(request, workspace_id: int, file_id: int, payload: FileMoveSchema):
-    data = _dump(payload)
-    return await sync_to_async(move_file)(request.auth, workspace_id, file_id, data["folder_id"])
+async def update_file_api(request, workspace_id: int, file_id: int, payload: FileUpdateSchema):
+    data = _dump(payload, exclude_unset=True)
+    if not data:
+        raise HttpError(400, "바꿀 값이 필요합니다.")
+    return await sync_to_async(update_file)(request.auth, workspace_id, file_id, data)
 
 
 @router.delete(

@@ -6,6 +6,7 @@ from django.conf import settings
 from ninja.errors import HttpError
 
 from config.aws import get_s3_client
+from document.names import is_windows_name
 
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
 PRESIGN_EXPIRES = 300
@@ -45,6 +46,8 @@ def display_filename(file_name: str) -> str:
         raise HttpError(400, "파일 이름이 필요합니다.")
     if len(base) > 255:
         raise HttpError(400, "파일 이름은 255자를 넘길 수 없습니다.")
+    if not is_windows_name(base):
+        raise HttpError(400, "파일 이름이 올바르지 않습니다.")
     return base
 
 
@@ -64,6 +67,17 @@ def assert_object_key(workspace_id: int, object_key: str) -> None:
     prefix = document_prefix(workspace_id)
     if not object_key or not object_key.startswith(prefix) or ".." in object_key:
         raise HttpError(400, "문서 저장 경로가 올바르지 않습니다.")
+
+
+def clean_content_hash(value: str | None, *, required: bool = False) -> str:
+    cleaned = (value or "").strip().lower()
+    if not cleaned:
+        if required:
+            raise HttpError(400, "파일 해시가 필요합니다.")
+        return ""
+    if len(cleaned) != 64 or any(char not in "0123456789abcdef" for char in cleaned):
+        raise HttpError(400, "파일 해시가 올바르지 않습니다.")
+    return cleaned
 
 
 def assert_size(size: int) -> None:

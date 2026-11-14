@@ -124,6 +124,12 @@ class DocumentFile(CommonModel):
     object_key = models.CharField(max_length=500, help_text="S3 객체 키")
     content_type = models.CharField(max_length=100, help_text="콘텐츠 타입")
     size = models.PositiveIntegerField(help_text="바이트 크기")
+    content_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="SHA-256",
+    )
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -139,7 +145,12 @@ class DocumentFile(CommonModel):
                 fields=["object_key"],
                 condition=models.Q(deleted_at__isnull=True),
                 name="unique_document_object_key",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["folder", "original_filename"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="unique_document_file_name",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -259,3 +270,35 @@ class DocumentMailLog(CommonModel):
 
     def __str__(self) -> str:
         return f"{self.file_id}:{self.status}"
+
+
+class DocumentChange(models.Model):
+    """동기화 클라이언트가 따라가는 문서함 변경입니다."""
+
+    class Entity(models.TextChoices):
+        FOLDER = ("folder", "폴더")
+        FILE = ("file", "파일")
+
+    class Op(models.TextChoices):
+        UPSERT = ("upsert", "반영")
+        DELETE = ("delete", "삭제")
+
+    space = models.ForeignKey(
+        DocumentSpace,
+        on_delete=models.CASCADE,
+        related_name="changes",
+        help_text="문서함",
+    )
+    entity = models.CharField(max_length=10, choices=Entity.choices, help_text="대상 종류")
+    entity_id = models.PositiveBigIntegerField(help_text="대상 id")
+    op = models.CharField(max_length=10, choices=Op.choices, help_text="동작")
+    payload = models.JSONField(default=dict, help_text="변경 내용")
+    created_at = models.DateTimeField(auto_now_add=True, help_text="생성일")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["space", "id"], name="document_change_space_id"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.space_id}:{self.entity}:{self.entity_id}:{self.op}"

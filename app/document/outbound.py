@@ -37,6 +37,7 @@ class FileResponseSchema(Schema):
     index_source: str
     description_ko: str
     tags_ko: list[str]
+    content_hash: str
     created_at: datetime
     updated_at: datetime
 
@@ -65,6 +66,25 @@ class SearchHitSchema(Schema):
     folder_path: str
     description_ko: str
     score: float
+
+
+class SyncCursorResponseSchema(Schema):
+    cursor: int
+
+
+class ChangeResponseSchema(Schema):
+    id: int
+    space_id: int
+    entity: str
+    entity_id: int
+    op: str
+    payload: dict
+    created_at: datetime
+
+
+class ChangeListResponseSchema(Schema):
+    changes: list[ChangeResponseSchema]
+    next_cursor: int
 
 
 class MailLogResponseSchema(Schema):

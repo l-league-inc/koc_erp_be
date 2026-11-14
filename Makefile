@@ -43,6 +43,9 @@ testws:
 run:
 	docker-compose run --rm app sh -c "python manage.py $(filter-out $@,$(MAKECMDGOALS))"
 
+drive:
+	bash clients/koc-drive/publish.sh
+
 # 해당 목표가 실제로 존재하지 않음을 Make에 알려주는 더미 규칙
 %:
 	@:

@@ -26,7 +26,23 @@ class FileCreateSchema(Schema):
     original_filename: str
     content_type: str
     size: int
+    content_hash: str = ""
 
 
-class FileMoveSchema(Schema):
-    folder_id: int
+class FileUpdateSchema(Schema):
+    folder_id: Optional[int] = None
+    original_filename: Optional[str] = None
+
+
+class FileReplaceUploadSchema(Schema):
+    content_type: str = "application/octet-stream"
+    size: int
+    base_hash: str = ""
+
+
+class FileReplaceSchema(Schema):
+    object_key: str
+    content_type: str
+    size: int
+    base_hash: str = ""
+    content_hash: str

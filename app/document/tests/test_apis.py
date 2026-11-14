@@ -7,7 +7,7 @@ from django.test import TestCase
 from ninja.testing import TestAsyncClient
 
 from document.api import router
-from document.models import DocumentDownload, DocumentFile, DocumentMailLog
+from document.models import DocumentChange, DocumentDownload, DocumentFile, DocumentMailLog
 from document.storage import document_prefix
 from user.utils import get_access_token
 from workspace.models import Workspace, WorkspaceMember
@@ -371,3 +371,172 @@ class DocumentApiTests(TestCase):
             headers=self.headers(self.admin),
         )
         self.assertEqual(hidden.status_code, 404)
+
+    async def test_rejects_duplicate_and_windows_names(self):
+        spaces = await self._spaces(self.member)
+        shared = next(item for item in spaces if item["kind"] == "shared")
+        folder = await self.client.post(
+            f"/{self.workspace.id}/folder",
+            json={"parent_id": shared["root_folder_id"], "name": "계약"},
+            headers=self.headers(self.member),
+        )
+        self.assertEqual(folder.status_code, 201, folder.json())
+        illegal_folder = await self.client.post(
+            f"/{self.workspace.id}/folder",
+            json={"parent_id": shared["root_folder_id"], "name": "a:b"},
+            headers=self.headers(self.member),
+        )
+        self.assertEqual(illegal_folder.status_code, 400)
+        with patch("document.storage.get_s3_client") as client:
+            client.return_value.generate_presigned_url.return_value = "https://upload.example/put"
+            first = await self.client.post(
+                f"/{self.workspace.id}/upload",
+                json={
+                    "folder_id": folder.json()["id"],
+                    "file_name": "계약서.txt",
+                    "content_type": "text/plain",
+                    "size": 4,
+                },
+                headers=self.headers(self.member),
+            )
+            second = await self.client.post(
+                f"/{self.workspace.id}/upload",
+                json={
+                    "folder_id": folder.json()["id"],
+                    "file_name": "다른계약서.txt",
+                    "content_type": "text/plain",
+                    "size": 4,
+                },
+                headers=self.headers(self.member),
+            )
+        registered = await self.client.post(
+            f"/{self.workspace.id}/file",
+            json={
+                "folder_id": folder.json()["id"],
+                "object_key": first.json()["object_key"],
+                "original_filename": "계약서.txt",
+                "content_type": "text/plain",
+                "size": 4,
+            },
+            headers=self.headers(self.member),
+        )
+        self.assertEqual(registered.status_code, 201, registered.json())
+        duplicate = await self.client.post(
+            f"/{self.workspace.id}/file",
+            json={
+                "folder_id": folder.json()["id"],
+                "object_key": second.json()["object_key"],
+                "original_filename": "계약서.txt",
+                "content_type": "text/plain",
+                "size": 4,
+            },
+            headers=self.headers(self.member),
+        )
+        self.assertEqual(duplicate.status_code, 400)
+        reserved = await self.client.post(
+            f"/{self.workspace.id}/upload",
+            json={
+                "folder_id": folder.json()["id"],
+                "file_name": "CON.txt",
+                "content_type": "text/plain",
+                "size": 4,
+            },
+            headers=self.headers(self.member),
+        )
+        self.assertEqual(reserved.status_code, 400)
+
+    async def test_sync_replace_cursor_and_changes(self):
+        spaces = await self._spaces(self.member)
+        shared = next(item for item in spaces if item["kind"] == "shared")
+        cursor = await self.client.get(
+            f"/{self.workspace.id}/sync-cursor?space_id={shared['id']}",
+            headers=self.headers(self.member),
+        )
+        self.assertEqual(cursor.status_code, 200, cursor.json())
+        self.assertEqual(cursor.json()["cursor"], 0)
+        content_hash = "a" * 64
+        with patch("document.storage.get_s3_client") as client:
+            client.return_value.generate_presigned_url.return_value = "https://upload.example/put"
+            upload = await self.client.post(
+                f"/{self.workspace.id}/upload",
+                json={
+                    "folder_id": shared["root_folder_id"],
+                    "file_name": "동기화.txt",
+                    "content_type": "text/plain",
+                    "size": 4,
+                },
+                headers=self.headers(self.member),
+            )
+        registered = await self.client.post(
+            f"/{self.workspace.id}/file",
+            json={
+                "folder_id": shared["root_folder_id"],
+                "object_key": upload.json()["object_key"],
+                "original_filename": "동기화.txt",
+                "content_type": "text/plain",
+                "size": 4,
+                "content_hash": content_hash,
+            },
+            headers=self.headers(self.member),
+        )
+        self.assertEqual(registered.status_code, 201, registered.json())
+        self.assertEqual(registered.json()["content_hash"], content_hash)
+        file_id = registered.json()["id"]
+        renamed = await self.client.patch(
+            f"/{self.workspace.id}/file/{file_id}",
+            json={"original_filename": "동기화-변경.txt"},
+            headers=self.headers(self.member),
+        )
+        self.assertEqual(renamed.status_code, 200, renamed.json())
+        self.assertEqual(renamed.json()["original_filename"], "동기화-변경.txt")
+        conflict = await self.client.post(
+            f"/{self.workspace.id}/file/{file_id}/upload",
+            json={"content_type": "text/plain", "size": 5, "base_hash": "b" * 64},
+            headers=self.headers(self.member),
+        )
+        self.assertEqual(conflict.status_code, 409)
+        with patch("document.storage.get_s3_client") as client:
+            client.return_value.generate_presigned_url.return_value = "https://upload.example/put"
+            replace_upload = await self.client.post(
+                f"/{self.workspace.id}/file/{file_id}/upload",
+                json={"content_type": "text/plain", "size": 5, "base_hash": content_hash},
+                headers=self.headers(self.member),
+            )
+        self.assertEqual(replace_upload.status_code, 200, replace_upload.json())
+        replaced_hash = "c" * 64
+        replaced = await self.client.post(
+            f"/{self.workspace.id}/file/{file_id}/content",
+            json={
+                "object_key": replace_upload.json()["object_key"],
+                "content_type": "text/plain",
+                "size": 5,
+                "base_hash": content_hash,
+                "content_hash": replaced_hash,
+            },
+            headers=self.headers(self.member),
+        )
+        self.assertEqual(replaced.status_code, 200, replaced.json())
+        self.assertEqual(replaced.json()["content_hash"], replaced_hash)
+        with patch("document.storage.get_s3_client") as client:
+            client.return_value.generate_presigned_url.return_value = "https://download.example/get"
+            sync_url = await self.client.post(
+                f"/{self.workspace.id}/file/{file_id}/sync-url",
+                headers=self.headers(self.member),
+            )
+        self.assertEqual(sync_url.status_code, 200, sync_url.json())
+        self.assertEqual(sync_url.json()["url"], "https://download.example/get")
+        self.assertEqual(await DocumentDownload.objects.filter(file_id=file_id).acount(), 0)
+        changes = await self.client.get(
+            f"/{self.workspace.id}/changes?space_id={shared['id']}&cursor=0",
+            headers=self.headers(self.member),
+        )
+        self.assertEqual(changes.status_code, 200, changes.json())
+        body = changes.json()
+        self.assertEqual(
+            [item["op"] for item in body["changes"]],
+            ["upsert", "upsert", "upsert"],
+        )
+        self.assertEqual(body["changes"][0]["entity"], "file")
+        self.assertEqual(body["changes"][-1]["payload"]["content_hash"], replaced_hash)
+        self.assertEqual(body["next_cursor"], body["changes"][-1]["id"])
+        self.assertEqual(await DocumentChange.objects.acount(), 3)

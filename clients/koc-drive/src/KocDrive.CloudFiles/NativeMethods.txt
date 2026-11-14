@@ -1,0 +1,8 @@
+CfConnectSyncRoot
+CfDisconnectSyncRoot
+CfCreatePlaceholders
+CfExecute
+CfUpdatePlaceholder
+CfConvertToPlaceholder
+CfGetPlaceholderStateFromFindData
+CF_CALLBACK_REGISTRATION

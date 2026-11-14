@@ -8,6 +8,7 @@ from document.indexer import (
     split_shared_file_ids,
 )
 from document.models import (
+    DocumentChange,
     DocumentDownload,
     DocumentFile,
     DocumentFolder,
@@ -57,7 +58,15 @@ class DocumentFolderAdmin(admin.ModelAdmin):
 
 @admin.register(DocumentFile)
 class DocumentFileAdmin(admin.ModelAdmin):
-    list_display = ("id", "original_filename", "folder", "size", "uploaded_by", "created_at")
+    list_display = (
+        "id",
+        "original_filename",
+        "folder",
+        "size",
+        "content_hash",
+        "uploaded_by",
+        "created_at",
+    )
     search_fields = ("original_filename", "object_key")
     actions = [reindex_selected]
 
@@ -77,3 +86,9 @@ class DocumentDownloadAdmin(admin.ModelAdmin):
 @admin.register(DocumentMailLog)
 class DocumentMailLogAdmin(admin.ModelAdmin):
     list_display = ("id", "file", "sender", "status", "sent_at", "created_at")
+
+
+@admin.register(DocumentChange)
+class DocumentChangeAdmin(admin.ModelAdmin):
+    list_display = ("id", "space", "entity", "entity_id", "op", "created_at")
+    list_filter = ("entity", "op")

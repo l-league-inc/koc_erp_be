@@ -13,7 +13,7 @@ audience: frontend
 2. 각 공간의 `root_folder_id`를 루트로 두고, `GET /api/v1/document/{workspace_id}/folder?space_id=&parent_id=`로 하위 폴더를 그립니다. `parent_id`를 비우면 루트의 자식입니다.
 3. 폴더 안 파일은 `GET /api/v1/document/{workspace_id}/file?folder_id=`입니다.
 4. 업로드는 `POST .../upload`로 URL을 받은 뒤, 그 URL에 PUT하고 `POST .../file`로 등록합니다. PUT 헤더 `Content-Type`은 응답의 `content_type`과 같아야 합니다.
-5. 다운로드는 `POST .../file/{file_id}/download`의 `url`로 받습니다. 이 호출이 다운로드 이력을 남깁니다.
+5. 다운로드는 `POST .../file/{file_id}/download`의 `url`로 받습니다. 이 호출이 다운로드 이력을 남깁니다. 탐색기 동기화 클라이언트는 `POST .../file/{file_id}/sync-url`을 쓰고, 이 호출은 이력을 남기지 않습니다.
 6. 검색은 `GET .../file/search?q=`이고, 본문은 `GET .../file/{file_id}`의 `extracted_text`입니다.
 7. 메일 발송 이력은 `GET .../file/{file_id}/mail`입니다. 발송 API는 아직 없습니다.
 
@@ -29,17 +29,24 @@ audience: frontend
 - `PATCH /folder/{folder_id}` `{name?, parent_id?}` 이름 변경 또는 같은 공간 이동
 - `DELETE /folder/{folder_id}` 빈 폴더 삭제. 204
 - `POST /upload` `{folder_id, file_name, content_type, size}` → `upload_url`, `object_key`, `content_type`, `expires_in`
-- `POST /file` `{folder_id, object_key, original_filename, content_type, size}` 등록. 201
+- `POST /file` `{folder_id, object_key, original_filename, content_type, size, content_hash?}` 등록. 201. `content_hash`는 SHA-256 소문자 64자이고, 없으면 빈 문자열입니다
 - `GET /file?folder_id=` 폴더 안 파일
 - `GET /file/search?q=` 검색 결과
 - `GET /file/{file_id}` 상세. `extracted_text`, `error` 포함
-- `PATCH /file/{file_id}` `{folder_id}` 같은 문서함으로 이동
+- `PATCH /file/{file_id}` `{folder_id?, original_filename?}` 같은 문서함 이동 또는 이름 변경. 둘 중 하나 이상
 - `DELETE /file/{file_id}` 소프트 삭제. 204. S3 객체는 지우지 않습니다
 - `POST /file/{file_id}/download` `{url, expires_in}`
+- `POST /file/{file_id}/sync-url` `{url, expires_in}`. 다운로드 이력을 만들지 않습니다
+- `POST /file/{file_id}/upload` `{content_type, size, base_hash}` 내용 교체용 PUT URL. `base_hash`가 현재 `content_hash`와 다르면 409
+- `POST /file/{file_id}/content` `{object_key, content_type, size, base_hash, content_hash}` 교체 확정. 해시를 바꾸고 색인을 다시 겁니다. 불일치하면 409
 - `POST /file/{file_id}/reindex` 올린 사람만. 상세와 같은 응답
 - `GET /file/{file_id}/mail` 발송 이력
+- `GET /sync-cursor?space_id=` `{cursor}` 현재 변경 커서. 변경이 없으면 0
+- `GET /changes?space_id=&cursor=` `{changes, next_cursor}` 커서 이후 변경. 한 번에 최대 200건
 
-파일 항목은 `id`, `workspace_id`, `space_id`, `space_kind`, `folder_id`, `original_filename`, `content_type`, `size`, `uploaded_by_id`, `path`, `index_status`, `index_source`, `description_ko`, `tags_ko`, `created_at`, `updated_at`입니다. 상세만 `extracted_text`, `error`가 있습니다.
+변경 항목은 `id`, `space_id`, `entity`(`folder`/`file`), `entity_id`, `op`(`upsert`/`delete`), `payload`, `created_at`입니다. 폴더 payload는 `name`, `parent_id`, `is_root`, `path`입니다. 파일 payload는 `folder_id`, `original_filename`, `content_type`, `size`, `content_hash`, `path`입니다. 최초 연결은 `sync-cursor`를 받은 뒤 폴더·파일 목록으로 트리를 만들고, 그 커서 이후만 `changes`로 따라갑니다.
+
+파일 항목은 `id`, `workspace_id`, `space_id`, `space_kind`, `folder_id`, `original_filename`, `content_type`, `size`, `uploaded_by_id`, `path`, `index_status`, `index_source`, `description_ko`, `tags_ko`, `content_hash`, `created_at`, `updated_at`입니다. 상세만 `extracted_text`, `error`가 있습니다. 같은 폴더의 파일 이름은 하나만 허용합니다.
 
 `index_status`는 `pending`, `processing`, `ready`, `failed`, `skipped`입니다. `index_source`는 `local` 또는 `llm`입니다. 공유 문서함의 PDF, DOCX, txt, md, csv는 본문을 추출한 뒤 언어 모델로 요약합니다. 공유 문서함의 이미지는 장면을 설명하고, 영상은 중간 장면을 설명하고, 오디오는 앞부분을 전사한 뒤 요약합니다. 개인 문서함은 본문을 추출할 수 있는 파일만 저장하고 언어 모델을 호출하지 않습니다. 그 외 형식은 `skipped`입니다.
 
@@ -49,7 +56,7 @@ audience: frontend
 
 메일 이력 항목은 `id`, `file_id`, `sender_id`, `recipients`, `subject`, `status`(`pending`/`sent`/`failed`), `sent_at`, `error`, `created_at`입니다.
 
-없는 워크스페이스는 404, 비멤버는 403입니다. 다른 사람의 개인 문서함·폴더·파일은 404입니다. 같은 이름 폴더, 빈 이름이 아닌 잘못된 이름, 다른 문서함으로의 이동, 비어 있지 않은 폴더 삭제는 400입니다. 올린 사람이 아닌 멤버의 삭제는 403이고, 소유자와 관리자는 공유 문서를 지울 수 있습니다.
+없는 워크스페이스는 404, 비멤버는 403입니다. 다른 사람의 개인 문서함·폴더·파일은 404입니다. 같은 이름 폴더·파일, 빈 이름, Windows에서 쓸 수 없는 이름(`\ / : * ? " < > |`, 끝의 공백·마침표, `CON` 같은 예약어), 다른 문서함으로의 이동, 비어 있지 않은 폴더 삭제는 400입니다. 내용 교체의 `base_hash`가 현재 해시와 다르면 409입니다. 올린 사람이 아닌 멤버의 삭제는 403이고, 소유자와 관리자는 공유 문서를 지울 수 있습니다.
 
 ## 구현 체크리스트
 

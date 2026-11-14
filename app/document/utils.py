@@ -9,6 +9,7 @@ from ninja.errors import HttpError
 
 from document.indexer import run_index
 from document.models import (
+    DocumentChange,
     DocumentDownload,
     DocumentFile,
     DocumentFolder,
@@ -16,11 +17,13 @@ from document.models import (
     DocumentMailLog,
     DocumentSpace,
 )
+from document.names import is_windows_name
 from document.storage import (
     PRESIGN_EXPIRES,
     assert_object_key,
     assert_size,
     build_object_key,
+    clean_content_hash,
     clean_content_type,
     display_filename,
     presign_get,
@@ -71,6 +74,7 @@ def create_folder(user, workspace_id: int, parent_id: int, name: str) -> dict:
         )
     except IntegrityError:
         raise HttpError(400, "같은 폴더에 같은 이름이 있습니다.") from None
+    _record_folder(folder, DocumentChange.Op.UPSERT)
     return serialize_folder(folder)
 
 
@@ -98,6 +102,7 @@ def update_folder(user, workspace_id: int, folder_id: int, data: dict) -> dict:
         folder.save(update_fields=["name", "parent", "updated_at"])
     except IntegrityError:
         raise HttpError(400, "같은 폴더에 같은 이름이 있습니다.") from None
+    _record_folder(folder, DocumentChange.Op.UPSERT)
     return serialize_folder(folder)
 
 
@@ -109,6 +114,7 @@ def delete_folder(user, workspace_id: int, folder_id: int) -> None:
         raise HttpError(400, "하위 폴더가 있는 폴더는 지울 수 없습니다.")
     if DocumentFile.objects.filter(folder=folder).exists():
         raise HttpError(400, "파일이 있는 폴더는 지울 수 없습니다.")
+    _record_folder(folder, DocumentChange.Op.DELETE)
     folder.delete()
 
 
@@ -143,6 +149,9 @@ def create_file(user, workspace_id: int, data: dict) -> dict:
         raise HttpError(400, "이미 등록된 문서입니다.")
     filename = display_filename(str(data["original_filename"]))
     content_type = clean_content_type(str(data["content_type"]))
+    content_hash = clean_content_hash(data.get("content_hash"))
+    if _file_name_taken(folder, filename):
+        raise HttpError(400, "같은 폴더에 같은 이름이 있습니다.")
     try:
         file = DocumentFile.objects.create(
             folder=folder,
@@ -150,10 +159,11 @@ def create_file(user, workspace_id: int, data: dict) -> dict:
             object_key=object_key,
             content_type=content_type,
             size=int(data["size"]),
+            content_hash=content_hash,
             uploaded_by=user,
         )
     except IntegrityError:
-        raise HttpError(400, "이미 등록된 문서입니다.") from None
+        raise HttpError(400, "이미 등록된 문서이거나 같은 이름이 있습니다.") from None
     DocumentIndex.objects.create(
         file=file,
         filename=filename,
@@ -161,6 +171,7 @@ def create_file(user, workspace_id: int, data: dict) -> dict:
         index_source=DocumentIndex.Source.LOCAL,
     )
     schedule_index(file.id)
+    _record_file(file, DocumentChange.Op.UPSERT)
     return serialize_file(file, detail=True)
 
 
@@ -180,13 +191,31 @@ def get_file_detail(user, workspace_id: int, file_id: int) -> dict:
     return serialize_file(file, detail=True)
 
 
-def move_file(user, workspace_id: int, file_id: int, folder_id: int) -> dict:
+def update_file(user, workspace_id: int, file_id: int, data: dict) -> dict:
     _membership, file = _get_file(user, workspace_id, file_id)
-    _membership, folder = _get_folder(user, workspace_id, folder_id)
-    if folder.space_id != file.folder.space_id:
-        raise HttpError(400, "다른 문서함으로는 옮길 수 없습니다.")
+    folder = file.folder
+    if data.get("folder_id") is not None:
+        _membership, folder = _get_folder(user, workspace_id, int(data["folder_id"]))
+        if folder.space_id != file.folder.space_id:
+            raise HttpError(400, "다른 문서함으로는 옮길 수 없습니다.")
+    filename = file.original_filename
+    if data.get("original_filename") is not None:
+        filename = display_filename(str(data["original_filename"]))
+    if folder.id == file.folder_id and filename == file.original_filename:
+        return serialize_file(file, detail=False)
+    if _file_name_taken(folder, filename, exclude_id=file.id):
+        raise HttpError(400, "같은 폴더에 같은 이름이 있습니다.")
     file.folder = folder
-    file.save(update_fields=["folder", "updated_at"])
+    file.original_filename = filename
+    try:
+        file.save(update_fields=["folder", "original_filename", "updated_at"])
+    except IntegrityError:
+        raise HttpError(400, "같은 폴더에 같은 이름이 있습니다.") from None
+    index = _index_of(file)
+    if index is not None and index.filename != filename:
+        index.filename = filename
+        index.save(update_fields=["filename", "updated_at"])
+    _record_file(file, DocumentChange.Op.UPSERT)
     return serialize_file(file, detail=False)
 
 
@@ -194,6 +223,7 @@ def delete_file(user, workspace_id: int, file_id: int) -> None:
     membership, file = _get_file(user, workspace_id, file_id)
     if file.uploaded_by_id != user.id and membership.role not in _MANAGE_ROLES:
         raise HttpError(403, "문서를 지울 권한이 없습니다.")
+    _record_file(file, DocumentChange.Op.DELETE)
     file.delete()
 
 
@@ -246,6 +276,84 @@ def search_files(user, workspace_id: int, keyword: str) -> list[dict]:
             }
         )
     return hits
+
+
+def create_replace_upload(
+    user,
+    workspace_id: int,
+    file_id: int,
+    content_type: str,
+    size: int,
+    base_hash: str,
+) -> dict:
+    _membership, file = _get_file(user, workspace_id, file_id)
+    _require_base_hash(file, base_hash)
+    assert_size(size)
+    cleaned_type = clean_content_type(content_type)
+    object_key = build_object_key(workspace_id, file.original_filename)
+    return {
+        "upload_url": presign_put(object_key, cleaned_type),
+        "object_key": object_key,
+        "content_type": cleaned_type,
+        "expires_in": PRESIGN_EXPIRES,
+    }
+
+
+@transaction.atomic
+def replace_file_content(user, workspace_id: int, file_id: int, data: dict) -> dict:
+    _membership, file = _get_file(user, workspace_id, file_id)
+    _require_base_hash(file, str(data.get("base_hash") or ""))
+    assert_size(int(data["size"]))
+    object_key = str(data["object_key"])
+    assert_object_key(workspace_id, object_key)
+    if DocumentFile.objects.filter(object_key=object_key).exclude(id=file.id).exists():
+        raise HttpError(400, "이미 등록된 문서입니다.")
+    file.object_key = object_key
+    file.content_type = clean_content_type(str(data["content_type"]))
+    file.size = int(data["size"])
+    file.content_hash = clean_content_hash(data.get("content_hash"), required=True)
+    try:
+        file.save(
+            update_fields=["object_key", "content_type", "size", "content_hash", "updated_at"]
+        )
+    except IntegrityError:
+        raise HttpError(400, "이미 등록된 문서입니다.") from None
+    _reset_index(file)
+    _record_file(file, DocumentChange.Op.UPSERT)
+    return serialize_file(file, detail=True)
+
+
+def create_sync_url(user, workspace_id: int, file_id: int) -> dict:
+    _membership, file = _get_file(user, workspace_id, file_id)
+    return {
+        "url": presign_get(file.object_key, file.original_filename),
+        "expires_in": PRESIGN_EXPIRES,
+    }
+
+
+def sync_cursor(user, workspace_id: int, space_id: int) -> dict:
+    _membership, space = _get_space(user, workspace_id, space_id)
+    latest = (
+        DocumentChange.objects.filter(space=space)
+        .order_by("-id")
+        .values_list("id", flat=True)
+        .first()
+    )
+    return {"cursor": int(latest or 0)}
+
+
+def list_changes(user, workspace_id: int, space_id: int, cursor: int) -> dict:
+    _membership, space = _get_space(user, workspace_id, space_id)
+    if cursor < 0:
+        raise HttpError(400, "커서가 올바르지 않습니다.")
+    rows = list(
+        DocumentChange.objects.filter(space=space, id__gt=cursor).order_by("id")[:200]
+    )
+    next_cursor = rows[-1].id if rows else cursor
+    return {
+        "changes": [_serialize_change(row) for row in rows],
+        "next_cursor": next_cursor,
+    }
 
 
 def create_download(user, workspace_id: int, file_id: int, source: str) -> dict:
@@ -336,6 +444,7 @@ def serialize_file(file: DocumentFile, *, detail: bool, path: str | None = None)
         "index_source": index.index_source if index else DocumentIndex.Source.LOCAL,
         "description_ko": index.description_ko if index else "",
         "tags_ko": _tags(index.tags_ko if index else ""),
+        "content_hash": file.content_hash,
         "created_at": file.created_at,
         "updated_at": file.updated_at,
     }
@@ -417,10 +526,8 @@ def _tags(raw: str) -> list[str]:
 
 def _clean_folder_name(name: str) -> str:
     cleaned = (name or "").strip()
-    if not cleaned or "/" in cleaned or "\\" in cleaned:
+    if not cleaned or len(cleaned) > 255 or not is_windows_name(cleaned):
         raise HttpError(400, "폴더 이름이 올바르지 않습니다.")
-    if len(cleaned) > 255:
-        raise HttpError(400, "폴더 이름은 255자를 넘길 수 없습니다.")
     return cleaned
 
 
@@ -556,6 +663,92 @@ def _is_descendant(folder: DocumentFolder, candidate_parent: DocumentFolder) -> 
         seen.add(current.id)
         current = current.parent
     return False
+
+
+def _file_name_taken(folder: DocumentFolder, filename: str, exclude_id: int | None = None) -> bool:
+    query = DocumentFile.objects.filter(folder=folder, original_filename=filename)
+    if exclude_id is not None:
+        query = query.exclude(id=exclude_id)
+    return query.exists()
+
+
+def _require_base_hash(file: DocumentFile, base_hash: str) -> None:
+    if clean_content_hash(base_hash) != (file.content_hash or ""):
+        raise HttpError(409, "문서가 다른 곳에서 바뀌었습니다.")
+
+
+def _reset_index(file: DocumentFile) -> None:
+    index = _index_of(file)
+    if index is None:
+        index = DocumentIndex.objects.create(
+            file=file,
+            filename=file.original_filename,
+            index_status=DocumentIndex.Status.PENDING,
+        )
+    else:
+        index.filename = file.original_filename
+        index.index_status = DocumentIndex.Status.PENDING
+        index.error = ""
+        index.extracted_text = ""
+        index.description_ko = ""
+        index.tags_ko = ""
+        index.save(
+            update_fields=[
+                "filename",
+                "index_status",
+                "error",
+                "extracted_text",
+                "description_ko",
+                "tags_ko",
+                "updated_at",
+            ]
+        )
+    schedule_index(file.id)
+    file.index = index
+
+
+def _record_folder(folder: DocumentFolder, op: str) -> None:
+    DocumentChange.objects.create(
+        space_id=folder.space_id,
+        entity=DocumentChange.Entity.FOLDER,
+        entity_id=folder.id,
+        op=op,
+        payload={
+            "name": folder.name,
+            "parent_id": folder.parent_id,
+            "is_root": folder.is_root,
+            "path": folder_path(folder),
+        },
+    )
+
+
+def _record_file(file: DocumentFile, op: str) -> None:
+    DocumentChange.objects.create(
+        space_id=file.folder.space_id,
+        entity=DocumentChange.Entity.FILE,
+        entity_id=file.id,
+        op=op,
+        payload={
+            "folder_id": file.folder_id,
+            "original_filename": file.original_filename,
+            "content_type": file.content_type,
+            "size": file.size,
+            "content_hash": file.content_hash,
+            "path": _file_path(file.folder, file.original_filename),
+        },
+    )
+
+
+def _serialize_change(change: DocumentChange) -> dict:
+    return {
+        "id": change.id,
+        "space_id": change.space_id,
+        "entity": change.entity,
+        "entity_id": change.entity_id,
+        "op": change.op,
+        "payload": change.payload or {},
+        "created_at": change.created_at,
+    }
 
 
 def _index_of(file: DocumentFile) -> DocumentIndex | None:

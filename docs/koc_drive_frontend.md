@@ -14,11 +14,14 @@ Windows 트레이 앱이 워크스페이스 공유 문서함을 탐색기에 보
 1. 이메일과 비밀번호로 `POST /api/v1/auth/login`에 로그인합니다. `refresh`는 Windows 자격 증명 관리자에 두고, `access`는 메모리에만 둡니다. 만료되면 `POST /api/v1/auth/refresh`로 바꿉니다.
 2. `GET /api/v1/workspace`로 워크스페이스를 고릅니다. 하나가 아니면 처음 한 번만 고르고 기억합니다.
 3. `GET /api/v1/document/{workspace_id}/space`에서 `kind`가 `shared`인 문서함을 고릅니다.
-4. `%USERPROFILE%\KOC ERP`를 동기화 루트로 등록합니다. 탐색기 탐색 창 이름은 KOC ERP입니다.
-5. `GET .../sync-cursor`를 받은 뒤 폴더·파일 목록으로 트리를 만듭니다. 이후 약 15초마다 `GET .../changes`만 따라갑니다.
+4. 앱이 켜지면 `%USERPROFILE%\KOC ERP` 폴더를 만들고, 바탕화면에 그 폴더로 가는 `KOC ERP` 바로가기가 없으면 만듭니다. 로그인한 뒤에 이 폴더를 동기화 루트로 등록합니다. 탐색기 탐색 창 이름은 KOC ERP입니다.
+5. 로그인이 끝나면 바로 동기화합니다. 알림으로 진행과 완료를 알려 줍니다. 앱을 다시 열 때 로그인이 남아 있으면 같은 알림으로 바로 동기화합니다. 이후 기본 15초마다 `GET .../changes`만 따라가며, 이 주기 동기화는 알림을 띄우지 않습니다. `지금 동기화`를 누르면 다시 알려 줍니다. 간격은 설정에서 바꿉니다.
 6. 파일을 열면 `POST .../file/{file_id}/sync-url`로 내용을 받아 채웁니다. 이 호출은 다운로드 이력을 남기지 않습니다.
 7. 저장, 이름 변경, 삭제는 문서함 API로 올립니다. 서버가 403이면 플레이스홀더를 되돌리고 트레이에 오류를 남깁니다.
-8. Windows에 로그인하면 앱이 다시 실행됩니다.
+8. Windows에 로그인하면 앱이 다시 실행됩니다. 설정에서 끌 수 있습니다.
+9. 실행하면 시계 옆 알림 영역에 아이콘이 생깁니다. Windows는 새 아이콘을 ^ 안에 넣습니다. 로그인 전이면 "로그인이 필요합니다. 시계 옆 아이콘을 눌러 주세요."라고 알려 줍니다. 아이콘을 두 번 누르면 작업 폴더가 열립니다. 로그인 전이어도 열립니다.
+10. 아이콘을 오른쪽 클릭하면 맨 위에 로그인 상태가 나옵니다. 로그아웃이면 `로그인`, `작업 폴더 열기`, `설정`, `종료`입니다. 로그인이면 `로그아웃`, `작업 폴더 열기`, `지금 동기화`, `설정`, `종료`입니다. 로그인된 동안에는 로그인 항목이 없습니다.
+11. 로그아웃하면 저장된 토큰을 지우고 탐색기 동기화를 해제합니다. 받아 둔 파일은 작업 폴더에서 지웁니다. 서버의 원본은 그대로입니다. 다시 로그인하면 파일을 다시 받습니다. 다른 프로그램이 파일을 열고 있으면 그 파일은 남을 수 있습니다.
 
 ## 충돌
 
@@ -28,8 +31,9 @@ Windows 트레이 앱이 워크스페이스 공유 문서함을 탐색기에 보
 
 - 코드는 `clients/koc-drive`입니다. `KocDrive.Core`는 `net8.0`이고 WSL에서 `dotnet test` 합니다.
 - `KocDrive.CloudFiles`와 `KocDrive.App`은 Windows에서만 동작합니다. 탐색기 확인은 Windows 기기에서 합니다.
-- 배포본은 Windows x64용 자체 포함 폴더입니다. .NET을 따로 설치하지 않습니다. `clients/koc-drive/publish.sh`가 `dist/KocDrive-win-x64.zip`을 만듭니다. 압축을 풀고 `KocDrive.exe`를 실행합니다. 설치 마법사는 없습니다.
-- 서버 주소 기본값은 `https://kocerpbe-main.up.railway.app`입니다. 다른 주소는 환경 변수 `KOC_API_BASE`로 바꿉니다.
+- 배포본은 Windows x64용 단일 실행 파일입니다. .NET을 따로 설치하지 않습니다. `clients/koc-drive/publish.sh`가 `dist/KocDrive-win-x64.zip`을 만듭니다. 압축을 풀면 `KOC ERP.exe`만 있습니다. 실행하면 알림 영역 아이콘이 바로 뜨고, `%LOCALAPPDATA%\KOC ERP\KOC ERP.exe`로 복사해 다음 로그인부터는 그 파일을 실행합니다. 설치 마법사는 없습니다.
+- 서버 주소 기본값은 `https://kocerpbe-main.up.railway.app`입니다. 설정에서 바꿀 수 있고, 환경 변수 `KOC_API_BASE`가 있으면 그 값이 우선합니다. https만 허용하고, 이 컴퓨터의 주소만 http를 쓸 수 있습니다. 주소에 계정 정보를 넣을 수 없습니다. 실제로 쓰는 주소가 바뀌면 로그아웃되고 저장한 토큰은 지웁니다. 파일 받기와 올리기 주소도 같은 규칙을 따르며, 다른 주소로 자동 이동하지 않습니다.
+- 설정은 `%LOCALAPPDATA%\KOC ERP\settings.json`에 있습니다. 서버 주소, Windows 시작 시 자동 실행, 동기화 간격, 상태 알림을 바꿉니다. 계정과 작업 폴더 경로는 보여 주기만 합니다.
 - 동기화 루트 등록은 `StorageProviderSyncRootManager`, 콜백은 Cloud Files API입니다.
 - 플레이스홀더 identity는 서버의 폴더 id, 파일 id입니다.
 

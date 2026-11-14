@@ -18,6 +18,9 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="koc-drive.ico" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\KocDrive.Core\KocDrive.Core.csproj" />
     <ProjectReference Include="..\KocDrive.CloudFiles\KocDrive.CloudFiles.csproj" />
   </ItemGroup>

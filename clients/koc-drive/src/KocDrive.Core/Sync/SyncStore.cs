@@ -59,6 +59,19 @@ public sealed class SyncStore : IDisposable
 
     public void WriteLong(string key, long value) => SetMeta(key, value.ToString());
 
+    public string? ReadText(string key) => GetMeta(key);
+
+    public void WriteText(string key, string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            Execute("DELETE FROM meta WHERE key = $key", ("$key", key));
+            return;
+        }
+
+        SetMeta(key, value);
+    }
+
     public long NextLocalId()
     {
         var current = long.TryParse(GetMeta("local_seq"), out var value) ? value : 0;
@@ -192,6 +205,13 @@ public sealed class SyncStore : IDisposable
     public IReadOnlyList<OutboxItem> ListOutbox() => QueryOutbox();
 
     public void DeleteOutbox(long id) => Execute("DELETE FROM outbox WHERE id = $id", ("$id", id));
+
+    public void ClearSession()
+    {
+        Execute("DELETE FROM nodes");
+        Execute("DELETE FROM outbox");
+        Execute("DELETE FROM meta");
+    }
 
     public void Dispose() => _connection.Dispose();
 

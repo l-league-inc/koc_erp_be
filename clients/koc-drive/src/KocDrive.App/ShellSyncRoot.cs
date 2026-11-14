@@ -27,4 +27,15 @@ internal static class ShellSyncRoot
         };
         StorageProviderSyncRootManager.Register(info);
     }
+
+    public static void Unregister()
+    {
+        try
+        {
+            StorageProviderSyncRootManager.Unregister(Id);
+        }
+        catch (Exception)
+        {
+        }
+    }
 }

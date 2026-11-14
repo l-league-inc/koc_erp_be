@@ -24,6 +24,10 @@ rm -rf "$out"
   -c Release \
   -r win-x64 \
   --self-contained true \
+  -p:PublishSingleFile=true \
+  -p:IncludeNativeLibrariesForSelfExtract=true \
+  -p:EnableCompressionInSingleFile=true \
+  -p:SatelliteResourceLanguages=ko \
   -p:DebugType=none \
   -p:DebugSymbols=false \
   -o "$out"
@@ -31,16 +35,26 @@ rm -rf "$out"
 archive="${root}/dist/KocDrive-win-x64.zip"
 rm -f "$archive"
 python3 - "$root" << 'PY'
+import shutil
 import sys
 import zipfile
 from pathlib import Path
 
 root = Path(sys.argv[1])
 folder = root / "dist" / "win-x64"
+exe = folder / "KOC ERP.exe"
+source = folder / "KocDrive.exe"
+if source.exists():
+    source.replace(exe)
+for path in list(folder.iterdir()):
+    if path.resolve() == exe.resolve():
+        continue
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
 archive = root / "dist" / "KocDrive-win-x64.zip"
 with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
-    for path in folder.rglob("*"):
-        if path.is_file():
-            package.write(path, Path("win-x64") / path.relative_to(folder))
+    package.write(exe, exe.name)
 print(archive)
 PY

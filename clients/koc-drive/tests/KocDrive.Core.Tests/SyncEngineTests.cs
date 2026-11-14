@@ -64,6 +64,34 @@ public class SyncEngineTests : IDisposable
     }
 
     [Fact]
+    public void ClearSessionDropsLocalIndex()
+    {
+        _store.IsInitialized = true;
+        _store.WriteLong("workspace", 7);
+        _store.Save(new SyncNode
+        {
+            Entity = "file",
+            ServerId = 3,
+            ParentServerId = 10,
+            Name = "a.txt",
+            RelativePath = "a.txt",
+            ServerHash = "abc",
+            LocalHash = "abc",
+            BaseHash = "abc",
+            Size = 4,
+            ContentType = "text/plain",
+        });
+        _store.Enqueue(new OutboxItem { Op = "delete", Entity = "file", ServerId = 3, RelativePath = "a.txt" });
+
+        _store.ClearSession();
+
+        Assert.Empty(_store.List());
+        Assert.Empty(_store.ListOutbox());
+        Assert.Equal(0, _store.ReadLong("workspace"));
+        Assert.False(_store.IsInitialized);
+    }
+
+    [Fact]
     public async Task RemoteDeleteRemovesACleanFile()
     {
         _store.IsInitialized = true;

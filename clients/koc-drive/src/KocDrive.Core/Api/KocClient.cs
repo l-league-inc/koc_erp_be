@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace KocDrive.Core.Api;
 
-public sealed class KocClient : IKocApi
+public sealed class KocClient : IKocApi, IDisposable
 {
     public const string DefaultBaseUrl = "https://kocerpbe-main.up.railway.app";
 
@@ -19,11 +19,17 @@ public sealed class KocClient : IKocApi
 
     public KocClient(Uri baseAddress, ITokenStore tokens, HttpMessageHandler? handler = null)
     {
+        if (!ApiEndpoint.TryParseBase(baseAddress.AbsoluteUri, out _))
+        {
+            throw new ArgumentException("서버 주소는 https여야 합니다.", nameof(baseAddress));
+        }
+
         _tokens = tokens;
         _refresh = tokens.LoadRefresh();
-        _api = handler == null ? new HttpClient() : new HttpClient(handler);
+        _api = handler == null ? new HttpClient(CreateHandler()) : new HttpClient(handler);
         _api.BaseAddress = baseAddress;
-        _blobs = new HttpClient();
+        _api.Timeout = TimeSpan.FromSeconds(60);
+        _blobs = new HttpClient(CreateHandler()) { Timeout = TimeSpan.FromMinutes(5) };
     }
 
     public async Task LoginAsync(string email, string password, CancellationToken cancellationToken)
@@ -259,7 +265,12 @@ public sealed class KocClient : IKocApi
             null,
             true,
             cancellationToken);
-        return await _blobs.GetByteArrayAsync(ticket.Url, cancellationToken);
+        if (!ApiEndpoint.TryParseBase(ticket.Url, out var download))
+        {
+            throw new KocApiException(400, "파일 주소가 허용되지 않습니다.");
+        }
+
+        return await _blobs.GetByteArrayAsync(download, cancellationToken);
     }
 
     private async Task RefreshAsync(CancellationToken cancellationToken)
@@ -282,7 +293,12 @@ public sealed class KocClient : IKocApi
 
     private async Task PutBytesAsync(UploadTicket ticket, byte[] bytes, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, ticket.UploadUrl);
+        if (!ApiEndpoint.TryParseBase(ticket.UploadUrl, out var upload))
+        {
+            throw new KocApiException(400, "파일 주소가 허용되지 않습니다.");
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, upload);
         request.Content = new ByteArrayContent(bytes);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue(ticket.ContentType);
         using var response = await _blobs.SendAsync(request, cancellationToken);
@@ -340,9 +356,63 @@ public sealed class KocClient : IKocApi
         {
             var detail = await response.Content.ReadAsStringAsync(cancellationToken);
             response.Dispose();
-            throw new KocApiException((int)response.StatusCode, string.IsNullOrWhiteSpace(detail) ? "요청이 실패했습니다." : detail);
+            throw new KocApiException((int)response.StatusCode, PublicFailure((int)response.StatusCode, detail));
         }
 
         return response;
+    }
+
+    private static SocketsHttpHandler CreateHandler() => new()
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+    };
+
+    private static string PublicFailure(int statusCode, string? body)
+    {
+        var detail = ReadDetail(body);
+        if (detail is null || SecretText.LooksSensitive(detail))
+        {
+            return $"요청이 실패했습니다 ({statusCode})";
+        }
+
+        return detail;
+    }
+
+    private static string? ReadDetail(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("detail", out var detail)
+                || detail.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            var text = detail.GetString()?.Trim();
+            if (string.IsNullOrEmpty(text) || text.Length > 180)
+            {
+                return null;
+            }
+
+            return text;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    public void Dispose()
+    {
+        _api.Dispose();
+        _blobs.Dispose();
     }
 }

@@ -415,7 +415,18 @@ public sealed class SyncEngine
             return true;
         }
 
-        var bytes = await _content.ReadAsync(node.RelativePath, cancellationToken);
+        byte[] bytes;
+        try
+        {
+            bytes = await _content.ReadAsync(node.RelativePath, cancellationToken);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            await RemoveGoneAsync(node, cancellationToken);
+            effects.Add(new SyncEffect.Remove(node.RelativePath));
+            return true;
+        }
+
         if (bytes.Length < 1 || bytes.Length > MaxBytes)
         {
             effects.Add(new SyncEffect.Status("파일 크기는 1바이트 이상 50MB 이하여야 합니다."));
@@ -482,21 +493,32 @@ public sealed class SyncEngine
             return true;
         }
 
+        await RemoveGoneAsync(node, cancellationToken);
+        effects.Add(new SyncEffect.Remove(node.RelativePath));
+        return true;
+    }
+
+    private async Task RemoveGoneAsync(SyncNode node, CancellationToken cancellationToken)
+    {
         if (node.ServerId > 0)
         {
-            if (node.Entity == "folder")
+            try
             {
-                await _api.DeleteFolderAsync(_workspaceId, node.ServerId, cancellationToken);
+                if (node.Entity == "folder")
+                {
+                    await _api.DeleteFolderAsync(_workspaceId, node.ServerId, cancellationToken);
+                }
+                else
+                {
+                    await _api.DeleteFileAsync(_workspaceId, node.ServerId, cancellationToken);
+                }
             }
-            else
+            catch (KocApiException exception) when (exception.StatusCode == 404)
             {
-                await _api.DeleteFileAsync(_workspaceId, node.ServerId, cancellationToken);
             }
         }
 
         _store.Remove(node.Entity, node.ServerId);
-        effects.Add(new SyncEffect.Remove(node.RelativePath));
-        return true;
     }
 
     private async Task<bool> DrainRenameAsync(OutboxItem item, List<SyncEffect> effects, CancellationToken cancellationToken)
@@ -563,7 +585,18 @@ public sealed class SyncEngine
             return;
         }
 
-        var bytes = await _content.ReadAsync(node.RelativePath, cancellationToken);
+        byte[] bytes;
+        try
+        {
+            bytes = await _content.ReadAsync(node.RelativePath, cancellationToken);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            await RemoveGoneAsync(node, cancellationToken);
+            effects.Add(new SyncEffect.Remove(node.RelativePath));
+            return;
+        }
+
         await UploadConflictCopyAsync(node, bytes, effects, cancellationToken);
     }
 

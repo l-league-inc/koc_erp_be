@@ -176,6 +176,64 @@ public class SyncEngineTests : IDisposable
     }
 
     [Fact]
+    public async Task MissingLocalFileIsDeletedOnTheServerWithoutRepeating()
+    {
+        _store.IsInitialized = true;
+        _store.Save(new SyncNode
+        {
+            Entity = "file",
+            ServerId = 3,
+            ParentServerId = 10,
+            Name = "test.txt",
+            RelativePath = "test.txt",
+            ServerHash = "abc",
+            LocalHash = "abc",
+            BaseHash = "abc",
+            Size = 4,
+        });
+        var engine = Engine();
+        engine.QueueLocalWrite("test.txt");
+
+        var effects = await engine.TickAsync(CancellationToken.None);
+        var again = await engine.TickAsync(CancellationToken.None);
+
+        Assert.Contains(effects, effect => effect is SyncEffect.Remove remove && remove.RelativePath == "test.txt");
+        Assert.DoesNotContain(effects, effect => effect is SyncEffect.Status);
+        Assert.DoesNotContain(again, effect => effect is SyncEffect.Status);
+        Assert.Equal([3L], _api.DeletedIds);
+        Assert.Null(_store.Find("file", 3));
+        Assert.Empty(_store.ListOutbox());
+    }
+
+    [Fact]
+    public async Task DeleteOfAnAlreadyRemovedServerFileClearsTheQueue()
+    {
+        _store.IsInitialized = true;
+        _store.Save(new SyncNode
+        {
+            Entity = "file",
+            ServerId = 3,
+            ParentServerId = 10,
+            Name = "test.txt",
+            RelativePath = "test.txt",
+            ServerHash = "abc",
+            LocalHash = "abc",
+            BaseHash = "abc",
+            Size = 4,
+        });
+        _api.DeleteStatus = 404;
+        var engine = Engine();
+        engine.QueueLocalDelete("test.txt");
+
+        var effects = await engine.TickAsync(CancellationToken.None);
+
+        Assert.Contains(effects, effect => effect is SyncEffect.Remove remove && remove.RelativePath == "test.txt");
+        Assert.DoesNotContain(effects, effect => effect is SyncEffect.Status);
+        Assert.Null(_store.Find("file", 3));
+        Assert.Empty(_store.ListOutbox());
+    }
+
+    [Fact]
     public async Task ForbiddenDeleteAsksTheShellToRestoreTheFile()
     {
         _store.IsInitialized = true;
@@ -213,8 +271,15 @@ public class SyncEngineTests : IDisposable
     {
         public Dictionary<string, byte[]> Files { get; } = new();
 
-        public Task<byte[]> ReadAsync(string relativePath, CancellationToken cancellationToken) =>
-            Task.FromResult(Files[relativePath]);
+        public Task<byte[]> ReadAsync(string relativePath, CancellationToken cancellationToken)
+        {
+            if (!Files.TryGetValue(relativePath, out var bytes))
+            {
+                throw new FileNotFoundException(relativePath);
+            }
+
+            return Task.FromResult(bytes);
+        }
     }
 
     private sealed class FakeApi : IKocApi
@@ -316,11 +381,14 @@ public class SyncEngineTests : IDisposable
 
         public int DeleteStatus { get; set; }
 
+        public List<long> DeletedIds { get; } = new();
+
         public Task DeleteFileAsync(long workspaceId, long fileId, CancellationToken cancellationToken)
         {
+            DeletedIds.Add(fileId);
             if (DeleteStatus >= 400)
             {
-                throw new KocApiException(DeleteStatus, "권한이 없습니다.");
+                throw new KocApiException(DeleteStatus, DeleteStatus == 404 ? "문서를 찾을 수 없습니다." : "권한이 없습니다.");
             }
 
             return Task.CompletedTask;

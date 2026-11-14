@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using KocDrive.Core.Api;
 using KocDrive.Core.Sync;
 using Windows.Win32;
 using Windows.Win32.Foundation;
@@ -173,7 +174,11 @@ public sealed class SyncRootConnection : IDisposable
         }
         catch (Exception exception)
         {
-            self._report(exception.Message);
+            if (exception is not KocApiException { StatusCode: 404 })
+            {
+                self._report(exception.Message);
+            }
+
             self.Transfer(info, null, 0, 0, failed: true);
         }
     }

@@ -25,6 +25,8 @@ internal sealed class TrayApplication : ApplicationContext
     private System.Windows.Forms.Timer? _revealTimer;
     private bool _iconRevealed;
     private string? _pendingNotice;
+    private string? _lastNotice;
+    private long _lastNoticeAt;
     private int _announceSync;
     private readonly Form _dialogs = new DialogHost();
     private readonly ToolStripMenuItem _statusItem;
@@ -425,8 +427,8 @@ internal sealed class TrayApplication : ApplicationContext
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
         };
         Volatile.Write(ref _acceptLocalChanges, 1);
-        _watcher.Created += (_, args) => OnLocalChange(args.FullPath, created: true);
-        _watcher.Changed += (_, args) => OnLocalChange(args.FullPath, created: false);
+        _watcher.Created += (_, args) => OnLocalChange(args.FullPath);
+        _watcher.Changed += (_, args) => OnLocalChange(args.FullPath);
         _watcher.Deleted += (_, args) => QueueDelete(args.FullPath);
         _watcher.Renamed += (_, args) => QueueRename(args.OldFullPath, args.FullPath);
         _timer.Start();
@@ -544,7 +546,7 @@ internal sealed class TrayApplication : ApplicationContext
         _connection.Upsert("file", apply.FileId, apply.RelativePath, bytes.Length);
     }
 
-    private void OnLocalChange(string fullPath, bool created)
+    private void OnLocalChange(string fullPath)
     {
         if (Volatile.Read(ref _acceptLocalChanges) == 0 || _applying > 0 || _engine is null || IsIgnored(fullPath) || IsDehydratedPlaceholder(fullPath))
         {
@@ -563,7 +565,7 @@ internal sealed class TrayApplication : ApplicationContext
             return;
         }
 
-        if (!created || File.Exists(fullPath))
+        if (File.Exists(fullPath))
         {
             _engine.QueueLocalWrite(relative);
         }
@@ -755,6 +757,14 @@ internal sealed class TrayApplication : ApplicationContext
 
     private void ShowNotice(string message)
     {
+        var now = Environment.TickCount64;
+        if (message == _lastNotice && now - _lastNoticeAt < 60_000)
+        {
+            return;
+        }
+
+        _lastNotice = message;
+        _lastNoticeAt = now;
         _icon.ShowBalloonTip(5000, "KOC ERP", message, ToolTipIcon.Info);
     }
 

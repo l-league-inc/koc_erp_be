@@ -9,8 +9,32 @@ internal static class AppInstall
 
     public static string ExePath => Path.Combine(DirectoryPath, ExeName);
 
+    public static string IconPath => Path.Combine(DirectoryPath, "KOC ERP.ico");
+
     public static bool IsInstalled(string path) =>
         string.Equals(Path.GetFullPath(path), Path.GetFullPath(ExePath), StringComparison.OrdinalIgnoreCase);
+
+    public static string EnsureIconFile()
+    {
+        Directory.CreateDirectory(DirectoryPath);
+        var assembly = typeof(AppInstall).Assembly;
+        var resource = assembly.GetManifestResourceNames()
+            .FirstOrDefault(name => name.EndsWith("koc-drive.ico", StringComparison.OrdinalIgnoreCase));
+        if (resource is null)
+        {
+            return IconPath;
+        }
+
+        using var stream = assembly.GetManifestResourceStream(resource);
+        if (stream is null)
+        {
+            return IconPath;
+        }
+
+        using var file = File.Create(IconPath);
+        stream.CopyTo(file);
+        return IconPath;
+    }
 
     public static void InstallCopy()
     {

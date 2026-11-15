@@ -12,23 +12,38 @@ internal static class DesktopShortcut
         }
 
         var linkPath = Path.Combine(desktop, "KOC ERP.lnk");
-        if (File.Exists(linkPath))
-        {
-            return;
-        }
-
         var shellType = Type.GetTypeFromProgID("WScript.Shell");
         if (shellType is null)
         {
             return;
         }
 
+        var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
         dynamic shell = Activator.CreateInstance(shellType)!;
         dynamic shortcut = shell.CreateShortcut(linkPath);
-        shortcut.TargetPath = folderPath;
+        // 폴더를 바로 가리키면 Windows가 아이콘을 폴더 아이콘으로 바꿉니다.
+        shortcut.TargetPath = explorer;
+        shortcut.Arguments = $"\"{folderPath}\"";
         shortcut.WorkingDirectory = folderPath;
-        shortcut.IconLocation = Application.ExecutablePath + ",0";
+        shortcut.IconLocation = IconLocation();
         shortcut.Description = "KOC ERP";
         shortcut.Save();
+    }
+
+    private static string IconLocation()
+    {
+        try
+        {
+            var iconPath = AppInstall.EnsureIconFile();
+            if (File.Exists(iconPath))
+            {
+                return iconPath + ",0";
+            }
+        }
+        catch (Exception)
+        {
+        }
+
+        return Application.ExecutablePath + ",0";
     }
 }

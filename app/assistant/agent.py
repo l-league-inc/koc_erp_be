@@ -487,7 +487,7 @@ def _system_prompt(session: AgentSession, user) -> str:
         "메일은 list_mails와 get_mail로 읽고, 보낼 때는 propose_send_mail만 씁니다. "
         "발송이 끝났다고 말하지 않습니다. "
         "견적서 파일은 propose_create_estimate만 씁니다. 행 금액과 합계는 넣지 않습니다. "
-        "파일을 만들었다고 말하지 않습니다.\n"
+        "확정 결과는 미리보기이며, PDF를 받았거나 메일을 보냈다고 말하지 않습니다.\n"
         f"{catalog}"
     )
 

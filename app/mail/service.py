@@ -154,6 +154,7 @@ def send_message(
     body: str,
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
+    attachments: list[tuple[str, bytes, str]] | None = None,
 ) -> dict[str, Any]:
     account = _load_account(user)
     username, password = _credentials(account)
@@ -166,6 +167,7 @@ def send_message(
             body=body,
             cc=cc,
             bcc=bcc,
+            attachments=attachments,
         )
     except HttpError as exc:
         account.last_error = str(exc.message)

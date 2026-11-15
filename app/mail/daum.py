@@ -266,6 +266,7 @@ def send_message(
     body: str,
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
+    attachments: list[tuple[str, bytes, str]] | None = None,
 ) -> dict[str, Any]:
     recipients = [item.strip() for item in (to or []) if item and item.strip()]
     if not recipients:
@@ -284,6 +285,9 @@ def send_message(
         message["Cc"] = ", ".join(cc_list)
     message["Subject"] = subject_text
     message.set_content(body_text)
+    for filename, content, mime in attachments or []:
+        maintype, subtype = mime.split("/", 1)
+        message.add_attachment(content, maintype=maintype, subtype=subtype, filename=filename)
     all_recipients = recipients + cc_list + bcc_list
     client = _smtp_login(username, password)
     try:

@@ -36,4 +36,33 @@ class EstimateDocumentSchema(Schema):
     supply_amount: int
     vat: int
     total: int
+    draft: EstimateDraft
     docx_base64: str
+
+
+class EstimatePdfSchema(Schema):
+    filename: str
+    content_type: str
+    supply_amount: int
+    vat: int
+    total: int
+    draft: EstimateDraft
+    pdf_base64: str
+
+
+class EstimateSendSchema(Schema):
+    draft: EstimateDraft
+    to: list[str]
+    subject: str = ""
+    body: str = ""
+    cc: list[str] = []
+    bcc: list[str] = []
+
+
+class EstimateSendResultSchema(Schema):
+    sender: str
+    to: list[str]
+    cc: list[str]
+    bcc: list[str]
+    subject: str
+    filename: str

@@ -147,8 +147,11 @@ class CatalogFilterTests(SimpleTestCase):
             ("POST", "/api/v1/estimate/documents/from-instruction/json"),
             self.endpoints,
         )
+        self.assertIn(("POST", "/api/v1/estimate/documents/pdf/json"), self.endpoints)
         self.assertNotIn(("POST", "/api/v1/estimate/documents"), self.endpoints)
         self.assertNotIn(("POST", "/api/v1/estimate/documents/from-instruction"), self.endpoints)
+        self.assertNotIn(("POST", "/api/v1/estimate/documents/pdf"), self.endpoints)
+        self.assertNotIn(("POST", "/api/v1/estimate/documents/send"), self.endpoints)
         spec = next(item for item in self.specs if item.path == "/api/v1/estimate/documents/json")
         self.assertIn("docx_base64", spec.description)
         self.assertIn("body", spec.input_schema["properties"])

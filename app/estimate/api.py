@@ -8,7 +8,14 @@ from ninja.errors import HttpError
 from api.security import jwt_auth
 from estimate import service
 from estimate.errors import EstimateError
-from estimate.schema import EstimateDocumentSchema, EstimateDraft, InstructionSchema
+from estimate.schema import (
+    EstimateDocumentSchema,
+    EstimateDraft,
+    EstimatePdfSchema,
+    EstimateSendResultSchema,
+    EstimateSendSchema,
+    InstructionSchema,
+)
 
 router = Router(tags=["Estimate"])
 
@@ -71,6 +78,46 @@ async def create_document_json_from_instruction_api(request, payload: Instructio
     )
 
 
+@router.post(
+    "/documents/pdf",
+    summary="[C] 견적서 PDF 작성",
+    description="편집한 초안을 다시 계산하고 정합성을 확인한 뒤 PDF를 반환합니다.",
+    auth=jwt_auth,
+)
+async def create_pdf_api(request, payload: EstimateDraft):
+    content = await sync_to_async(_pdf)(payload)
+    filename = service.document_name(payload.client, payload.issued_on, "pdf")
+    return _file_response(content, service.PDF_MIME, filename)
+
+
+@router.post(
+    "/documents/pdf/json",
+    summary="[C] 견적서 PDF JSON 작성",
+    description=(
+        "편집한 초안을 다시 계산하고 정합성을 확인한 뒤 파일명, 합계, pdf base64를 반환합니다. "
+        "견적 레코드는 저장하지 않습니다."
+    ),
+    response=EstimatePdfSchema,
+    auth=jwt_auth,
+)
+async def create_pdf_json_api(request, payload: EstimateDraft):
+    return await sync_to_async(_pdf_payload)(payload)
+
+
+@router.post(
+    "/documents/send",
+    summary="[C] 견적서 메일 발송",
+    description=(
+        "편집한 초안으로 PDF를 만들고 등록된 Daum 계정에서 첨부해 보냅니다. "
+        "받는 사람이 있을 때만 호출합니다. 견적 레코드는 저장하지 않습니다."
+    ),
+    response=EstimateSendResultSchema,
+    auth=jwt_auth,
+)
+async def send_estimate_api(request, payload: EstimateSendSchema):
+    return await sync_to_async(_send)(request.auth, payload)
+
+
 def _document(payload: EstimateDraft) -> bytes:
     try:
         return service.build_document(payload)
@@ -99,8 +146,32 @@ def _document_payload_from_instruction(user, instruction: str, model: str) -> di
         raise HttpError(400, str(exc)) from None
 
 
+def _pdf(payload: EstimateDraft) -> bytes:
+    try:
+        return service.build_pdf(payload)
+    except EstimateError as exc:
+        raise HttpError(400, str(exc)) from None
+
+
+def _pdf_payload(payload: EstimateDraft) -> dict:
+    try:
+        return service.pdf_payload(payload)
+    except EstimateError as exc:
+        raise HttpError(400, str(exc)) from None
+
+
+def _send(user, payload: EstimateSendSchema) -> dict:
+    try:
+        return service.send_estimate(user, payload)
+    except EstimateError as exc:
+        raise HttpError(400, str(exc)) from None
+
+
 def _response(content: bytes, client: str, issued_on) -> HttpResponse:
-    filename = service.document_name(client, issued_on)
-    response = HttpResponse(content, content_type=service.DOCX_MIME)
+    return _file_response(content, service.DOCX_MIME, service.document_name(client, issued_on))
+
+
+def _file_response(content: bytes, content_type: str, filename: str) -> HttpResponse:
+    response = HttpResponse(content, content_type=content_type)
     response["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
     return response

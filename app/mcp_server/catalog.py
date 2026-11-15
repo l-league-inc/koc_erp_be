@@ -84,12 +84,14 @@ PUBLIC_ENDPOINTS = frozenset(
         ("POST", "/api/v1/mail/send"),
         ("POST", "/api/v1/estimate/documents/json"),
         ("POST", "/api/v1/estimate/documents/from-instruction/json"),
+        ("POST", "/api/v1/estimate/documents/pdf/json"),
     }
 )
 ESTIMATE_POSTS = frozenset(
     {
         ("POST", "/api/v1/estimate/documents/json"),
         ("POST", "/api/v1/estimate/documents/from-instruction/json"),
+        ("POST", "/api/v1/estimate/documents/pdf/json"),
     }
 )
 OPEN_WORLD_POSTS = frozenset()
@@ -396,11 +398,20 @@ def _description(method: str, path: str, summary: str, detail: str) -> str:
             "이 조회는 해당 글의 공개 조회수를 1 올립니다. 글 내용과 댓글은 바꾸지 않습니다."
         )
     if (method, path) in ESTIMATE_POSTS:
-        lines.append(
-            "응답의 docx_base64가 견적서 파일입니다. 공급가액, 부가세, 합계는 서버가 계산한 값입니다. "
-            "금액 키를 보내지 않습니다. 장비는 6대까지이고 한 대는 부품 한 줄과 작업시간 한 줄입니다. "
-            "말하지 않은 단가는 만들지 않습니다. 견적 레코드는 저장하지 않습니다."
-        )
+        if path.endswith("/pdf/json"):
+            lines.append(
+                "응답의 pdf_base64가 견적서 PDF입니다. draft는 편집에 다시 넣는 초안입니다. "
+                "공급가액, 부가세, 합계는 서버가 계산한 값입니다. 금액 키를 보내지 않습니다. "
+                "장비는 6대까지이고 한 대는 부품 한 줄과 작업시간 한 줄입니다. "
+                "견적 레코드는 저장하지 않고 메일도 보내지 않습니다."
+            )
+        else:
+            lines.append(
+                "응답의 docx_base64가 미리보기 파일이고 draft가 편집용 초안입니다. "
+                "공급가액, 부가세, 합계는 서버가 계산한 값입니다. 금액 키를 보내지 않습니다. "
+                "장비는 6대까지이고 한 대는 부품 한 줄과 작업시간 한 줄입니다. "
+                "말하지 않은 단가는 만들지 않습니다. 견적 레코드는 저장하지 않습니다."
+            )
     if method == "POST":
         lines.append("이 호출은 데이터를 만들 수 있습니다. 실패해도 자동으로 다시 호출하지 않습니다.")
     if method == "PATCH":

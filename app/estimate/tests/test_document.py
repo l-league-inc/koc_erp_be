@@ -16,8 +16,8 @@ from estimate.formio import (
     set_cell_text,
 )
 from estimate.render import render_document
-from estimate.schema import DeviceInput, EstimateDraft
-from estimate.service import build_document, document_payload
+from estimate.schema import DeviceInput, EstimateDraft, EstimateSendSchema
+from estimate.service import build_document, build_pdf, document_payload, pdf_payload, send_estimate
 from estimate.tests.samples import example_draft
 from estimate.validate import parse_document, verify_document
 
@@ -110,6 +110,37 @@ class DocumentTests(SimpleTestCase):
         parsed = verify_document(base64.b64decode(payload["docx_base64"]))
         self.assertEqual(parsed.header_total, 677600)
         self.assertEqual(parsed.client_line, "LG유플러스 수원운영팀")
+        self.assertEqual(payload["draft"]["client"], "LG유플러스")
+        self.assertEqual(len(payload["draft"]["devices"]), 6)
+
+    def test_pdf_is_downloadable(self):
+        content = build_pdf(example_draft())
+        self.assertTrue(content.startswith(b"%PDF"))
+        payload = pdf_payload(example_draft())
+        self.assertEqual(payload["filename"], "견적서_LG유플러스_2026-11-10.pdf")
+        self.assertEqual(payload["total"], 677600)
+        self.assertEqual(payload["draft"]["contact"], "김현전")
+        self.assertTrue(base64.b64decode(payload["pdf_base64"]).startswith(b"%PDF"))
+
+    def test_send_attaches_the_pdf(self):
+        with patch("mail.service.send_message") as send:
+            send.return_value = {
+                "sender": "sales@daum.net",
+                "to": ["buyer@example.com"],
+                "cc": [],
+                "bcc": [],
+                "subject": "견적서 LG유플러스 2026-11-10",
+            }
+            result = send_estimate(
+                object(),
+                EstimateSendSchema(draft=example_draft(), to=["buyer@example.com"]),
+            )
+        filename, content, mime = send.call_args.kwargs["attachments"][0]
+        self.assertEqual(filename, "견적서_LG유플러스_2026-11-10.pdf")
+        self.assertTrue(content.startswith(b"%PDF"))
+        self.assertEqual(mime, "application/pdf")
+        self.assertEqual(result["filename"], filename)
+        self.assertEqual(send.call_args.kwargs["to"], ["buyer@example.com"])
 
     def test_too_many_devices_do_not_render(self):
         draft = example_draft()

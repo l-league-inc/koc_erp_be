@@ -100,6 +100,7 @@ class ConfirmedEstimateSchema(Schema):
     supply_amount: int
     vat: int
     total: int
+    draft: dict
     docx_base64: str
 
 

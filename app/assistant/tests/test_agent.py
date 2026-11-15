@@ -601,6 +601,8 @@ class EstimateSkillFileTests(SimpleTestCase):
         self.assertEqual(skills["estimate"]["source"], "bundled")
         self.assertIn("propose_create_estimate", skills["estimate"]["body"])
         self.assertIn("6대", skills["estimate"]["body"])
+        self.assertIn("미리보기", skills["estimate"]["body"])
+        self.assertIn("PDF", skills["estimate"]["body"])
         self.assertIn("estimate", skills["quote"]["body"])
         names = [tool["function"]["name"] for tool in _TOOLS]
         self.assertIn("propose_create_estimate", names)

@@ -1,13 +1,20 @@
+import base64
 from unittest.mock import patch
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from ninja.errors import HttpError
 from ninja.testing import TestAsyncClient
 
-from assistant.agent import _dispatch
+from assistant import skillbook
+from assistant.agent import _TOOLS, _dispatch
+from estimate.compose import draft_from_payload
+from estimate.errors import EstimateError
+from estimate.schema import EstimateDraft
+from estimate.service import document_payload
+from estimate.tests.samples import example_payload
 from assistant.api import agent_router
 from assistant.models import AgentSession, Skill
 from user.utils import get_access_token
@@ -524,3 +531,93 @@ class AgentApiTests(TestCase):
         self.assertEqual(confirmed.json()["skills"], [])
         self.assertEqual(confirmed.json()["mails"][0]["subject"], "회신")
         sent.assert_called_once()
+
+    async def test_estimate_skill_confirms_into_docx(self):
+        workspace_id = await self._workspace_id()
+        listed = await self.client.get(
+            f"/skill?workspace_id={workspace_id}",
+            headers=self.headers(),
+        )
+        estimate_skill = next(item for item in listed.json() if item["name"] == "estimate")
+        self.assertEqual(estimate_skill["source"], "bundled")
+        self.assertIsNone(estimate_skill["id"])
+        self.assertIn("propose_create_estimate", estimate_skill["body"])
+        rejected = await self.client.post(
+            "/skill",
+            json={
+                "workspace_id": workspace_id,
+                "name": "estimate",
+                "description": "다른 견적서",
+                "body": "다른 절차",
+            },
+            headers=self.headers(),
+        )
+        self.assertEqual(rejected.status_code, 400)
+
+        session = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id},
+            headers=self.headers(),
+        )
+        session_id = session.json()["id"]
+        stored = await sync_to_async(AgentSession.objects.get)(id=session_id)
+        action = await sync_to_async(_dispatch)(
+            stored,
+            self.user,
+            "propose_create_estimate",
+            example_payload(),
+            [],
+        )
+        self.assertEqual(action["kind"], "create_estimate")
+        self.assertNotIn("total", action["payload"])
+        self.assertNotIn("docx_base64", action["payload"])
+
+        with self.assertRaises(HttpError):
+            await sync_to_async(_dispatch)(
+                stored,
+                self.user,
+                "propose_create_estimate",
+                {**example_payload(), "devices": [{**example_payload()["devices"][0], "part_unit_price": None}]},
+                [],
+            )
+
+        confirmed = await self.client.post(
+            f"/session/{session_id}/confirm",
+            json={"action_ids": [action["id"]]},
+            headers=self.headers(),
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.json())
+        document = confirmed.json()["estimates"][0]
+        self.assertEqual(document["total"], 677600)
+        self.assertEqual(document["vat"], 61600)
+        self.assertEqual(document["supply_amount"], 616000)
+        self.assertTrue(base64.b64decode(document["docx_base64"]).startswith(b"PK"))
+        self.assertEqual(confirmed.json()["records"], [])
+
+
+class EstimateSkillFileTests(SimpleTestCase):
+    def test_bundled_skill_points_at_the_file_tool(self):
+        skills = {item["name"]: item for item in skillbook.load_bundled()}
+        self.assertEqual(skills["estimate"]["source"], "bundled")
+        self.assertIn("propose_create_estimate", skills["estimate"]["body"])
+        self.assertIn("6대", skills["estimate"]["body"])
+        self.assertIn("estimate", skills["quote"]["body"])
+        names = [tool["function"]["name"] for tool in _TOOLS]
+        self.assertIn("propose_create_estimate", names)
+
+    def test_confirmed_payload_becomes_docx_without_stored_amounts(self):
+        draft = draft_from_payload(example_payload())
+        stored = draft.model_dump(mode="json")
+        self.assertNotIn("total", stored)
+        self.assertNotIn("docx_base64", stored)
+        document = document_payload(EstimateDraft.model_validate(stored))
+        self.assertEqual(document["supply_amount"], 616000)
+        self.assertEqual(document["vat"], 61600)
+        self.assertEqual(document["total"], 677600)
+        self.assertTrue(base64.b64decode(document["docx_base64"]).startswith(b"PK"))
+
+    def test_missing_price_is_rejected_before_a_file(self):
+        payload = example_payload()
+        payload["devices"][0]["part_unit_price"] = None
+        with self.assertRaisesMessage(EstimateError, "부품 단가가 필요합니다."):
+            draft_from_payload(payload)

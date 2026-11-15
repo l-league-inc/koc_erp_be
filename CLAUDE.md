@@ -49,3 +49,4 @@ applyTo: "**"
 | [koc_drive_frontend.md](../docs/koc_drive_frontend.md) | Windows 탐색기 동기화, 플레이스홀더, 충돌 |
 | [voice_frontend.md](../docs/voice_frontend.md) | 음성 등록, 비공개 S3 presigned 업로드·재생 |
 | [mail_frontend.md](../docs/mail_frontend.md) | Daum 메일 계정, IMAP 조회, SMTP 발송, 에이전트·MCP |
+| [estimate_frontend.md](../docs/estimate_frontend.md) | 견적서 docx 작성, 금액 계산, 정합성 검증 |

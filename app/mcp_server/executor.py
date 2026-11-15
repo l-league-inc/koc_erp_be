@@ -18,6 +18,13 @@ from mcp_server.redaction import omit_user_integer_ids, redact
 logger = logging.getLogger("mcp_server")
 _PATH_PARAM = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _REQUEST_TIMEOUT_SECONDS = 30.0
+_ESTIMATE_INSTRUCTION_TIMEOUT_SECONDS = 120.0
+
+
+def request_timeout(path: str, default: float = _REQUEST_TIMEOUT_SECONDS) -> float:
+    if path.startswith("/api/v1/estimate/documents/from-instruction"):
+        return max(default, _ESTIMATE_INSTRUCTION_TIMEOUT_SECONDS)
+    return default
 
 
 @dataclass(frozen=True)
@@ -76,7 +83,7 @@ class AsgiApiTransport:
             async with httpx.AsyncClient(
                 transport=transport,
                 base_url=internal_api_base_url(),
-                timeout=self.timeout,
+                timeout=request_timeout(path, self.timeout),
                 follow_redirects=False,
             ) as client:
                 response = await client.request(

@@ -145,7 +145,7 @@ async def send_message_api(request, session_id: int, payload: MessageCreateSchem
 @agent_router.post(
     "/session/{session_id}/confirm",
     summary="[C] 업무 초안 확정",
-    description="대기 중인 초안만 워크스페이스에 저장합니다.",
+    description="대기 중인 초안을 확정합니다. 레코드와 스킬은 저장하고, 메일은 발송하고, 견적서는 파일을 만듭니다.",
     response=ConfirmResultSchema,
     auth=jwt_auth,
 )

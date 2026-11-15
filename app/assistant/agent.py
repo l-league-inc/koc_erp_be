@@ -10,6 +10,11 @@ from ninja.errors import HttpError
 
 from assistant import llm, skillbook
 from assistant.models import AgentMessage, AgentSession, ProposedAction
+from estimate.calculate import calculate
+from estimate.compose import draft_from_payload
+from estimate.errors import EstimateError
+from estimate.schema import EstimateDraft
+from estimate.service import document_payload
 from workspace.models import Property, RecordActivity
 from document.utils import get_file_detail, search_files
 from mail import service as mail_service
@@ -142,6 +147,59 @@ _TOOLS = [
                     "enabled": {"type": "boolean"},
                 },
                 "required": ["name", "description", "body"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_create_estimate",
+            "description": "견적서 파일 초안을 만듭니다. 금액은 계산하지 않습니다. 사용자가 확정하기 전에는 파일이 없습니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "client": {"type": "string"},
+                    "department": {"type": "string"},
+                    "contact": {"type": "string"},
+                    "issued_on": {"type": "string"},
+                    "product_name": {"type": "string"},
+                    "devices": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "serial": {"type": "string"},
+                                "part_name": {"type": "string"},
+                                "part_unit": {"type": "string"},
+                                "part_qty": {"type": "integer"},
+                                "part_unit_price": {"type": "integer"},
+                                "labor_level": {"type": "string"},
+                                "labor_hours": {"type": "integer"},
+                                "labor_unit_price": {"type": "integer"},
+                            },
+                            "required": [
+                                "serial",
+                                "part_name",
+                                "part_qty",
+                                "part_unit_price",
+                                "labor_level",
+                                "labor_hours",
+                                "labor_unit_price",
+                            ],
+                        },
+                    },
+                    "shipping_qty": {"type": "integer"},
+                    "shipping_unit_price": {"type": "integer"},
+                },
+                "required": [
+                    "client",
+                    "department",
+                    "contact",
+                    "issued_on",
+                    "product_name",
+                    "devices",
+                ],
                 "additionalProperties": False,
             },
         },
@@ -427,7 +485,9 @@ def _system_prompt(session: AgentSession, user) -> str:
         "회사 문서는 search_documents로 찾고 get_document로 본문을 읽습니다. "
         "개인 문서는 이 사용자 것만 나옵니다. "
         "메일은 list_mails와 get_mail로 읽고, 보낼 때는 propose_send_mail만 씁니다. "
-        "발송이 끝났다고 말하지 않습니다.\n"
+        "발송이 끝났다고 말하지 않습니다. "
+        "견적서 파일은 propose_create_estimate만 씁니다. 행 금액과 합계는 넣지 않습니다. "
+        "파일을 만들었다고 말하지 않습니다.\n"
         f"{catalog}"
     )
 
@@ -572,6 +632,19 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
         )
         created.append(action.id)
         return serialize_action(action)
+    if name == "propose_create_estimate":
+        try:
+            draft = draft_from_payload(arguments)
+            calculate(draft)
+        except EstimateError as exc:
+            raise HttpError(400, str(exc)) from None
+        action = ProposedAction.objects.create(
+            session=session,
+            kind=ProposedAction.Kind.CREATE_ESTIMATE,
+            payload=draft.model_dump(mode="json"),
+        )
+        created.append(action.id)
+        return serialize_action(action)
     if name == "propose_update_skill":
         action = ProposedAction.objects.create(
             session=session,
@@ -657,6 +730,7 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
     records = []
     skills = []
     mails = []
+    estimates = []
     for action in actions:
         payload = action.payload or {}
         if action.kind == ProposedAction.Kind.CREATE_RECORD:
@@ -708,6 +782,13 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
             skills.append(
                 {"action_id": action.id, "skill_id": saved["id"], "name": saved["name"]}
             )
+        elif action.kind == ProposedAction.Kind.CREATE_ESTIMATE:
+            try:
+                document = document_payload(EstimateDraft.model_validate(payload))
+            except EstimateError as exc:
+                raise HttpError(400, str(exc)) from None
+            action.result = document
+            estimates.append({"action_id": action.id, **document})
         elif action.kind == ProposedAction.Kind.SEND_MAIL:
             sent = mail_service.send_message(
                 user,
@@ -729,4 +810,5 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
         "records": records,
         "skills": skills,
         "mails": mails,
+        "estimates": estimates,
     }

@@ -18,6 +18,7 @@ from mcp_server.executor import (
     ApiResult,
     AsgiApiTransport,
     execute_tool,
+    request_timeout,
     internal_api_base_url,
     mcp_request_headers,
 )
@@ -185,6 +186,14 @@ class ExecutorUnitTests(SimpleTestCase):
         self.assertEqual(body["name"], "김민수")
         self.assertNotIn("id", body)
         self.assertEqual(body["profile"]["id"], 44)
+
+
+class EstimateTimeoutTests(SimpleTestCase):
+    def test_instruction_path_waits_for_the_model(self):
+        self.assertEqual(request_timeout("/api/v1/estimate/documents/from-instruction/json"), 120)
+        self.assertEqual(request_timeout("/api/v1/estimate/documents/from-instruction"), 120)
+        self.assertEqual(request_timeout("/api/v1/estimate/documents/json"), 30)
+        self.assertEqual(request_timeout("/api/v1/mail/send"), 30)
 
 
 class McpAuthTests(SimpleTestCase):

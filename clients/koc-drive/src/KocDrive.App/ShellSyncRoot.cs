@@ -16,7 +16,7 @@ internal static class ShellSyncRoot
             Id = Id,
             Path = await StorageFolder.GetFolderFromPathAsync(path),
             DisplayNameResource = "KOC ERP",
-            IconResource = @"%SystemRoot%\system32\imageres.dll,-3",
+            IconResource = ExeIconResource(),
             HydrationPolicy = StorageProviderHydrationPolicy.Full,
             PopulationPolicy = StorageProviderPopulationPolicy.AlwaysFull,
             InSyncPolicy = StorageProviderInSyncPolicy.FileCreationTime | StorageProviderInSyncPolicy.DirectoryCreationTime,
@@ -26,6 +26,17 @@ internal static class ShellSyncRoot
             Context = CryptographicBuffer.ConvertStringToBinary(Id, BinaryStringEncoding.Utf8),
         };
         StorageProviderSyncRootManager.Register(info);
+    }
+
+    private static string ExeIconResource()
+    {
+        var path = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(path))
+        {
+            return @"%SystemRoot%\system32\imageres.dll,-3";
+        }
+
+        return path + ",0";
     }
 
     public static void Unregister()

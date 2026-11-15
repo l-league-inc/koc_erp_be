@@ -93,11 +93,22 @@ class ConfirmedMailSchema(Schema):
     subject: str
 
 
+class ConfirmedEstimateSchema(Schema):
+    action_id: int
+    filename: str
+    content_type: str
+    supply_amount: int
+    vat: int
+    total: int
+    docx_base64: str
+
+
 class ConfirmResultSchema(Schema):
     proposed_actions: list[ProposedActionResponseSchema]
     records: list[ConfirmedRecordSchema]
     skills: list[ConfirmedSkillSchema]
     mails: list[ConfirmedMailSchema] = []
+    estimates: list[ConfirmedEstimateSchema] = []
 
 
 class SkillCreateSchema(Schema):

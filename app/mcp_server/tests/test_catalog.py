@@ -141,6 +141,24 @@ class CatalogFilterTests(SimpleTestCase):
             any(method == "DELETE" and path.startswith("/api/v1/workspace") for method, path in self.endpoints)
         )
 
+    def test_estimate_json_tools_are_public(self):
+        self.assertIn(("POST", "/api/v1/estimate/documents/json"), self.endpoints)
+        self.assertIn(
+            ("POST", "/api/v1/estimate/documents/from-instruction/json"),
+            self.endpoints,
+        )
+        self.assertNotIn(("POST", "/api/v1/estimate/documents"), self.endpoints)
+        self.assertNotIn(("POST", "/api/v1/estimate/documents/from-instruction"), self.endpoints)
+        spec = next(item for item in self.specs if item.path == "/api/v1/estimate/documents/json")
+        self.assertIn("docx_base64", spec.description)
+        self.assertIn("body", spec.input_schema["properties"])
+        self.assertIn("devices", spec.input_schema["properties"]["body"]["properties"])
+        safety = tool_safety(spec.method, spec.path)
+        self.assertFalse(safety["read_only"])
+        self.assertFalse(safety["open_world"])
+        self.assertFalse(safety["destructive"])
+        self.assertIn("저장소에는 쓰지 않습니다", safety["justifications"]["read_only_justification"])
+
     def test_tool_names_are_unique(self):
         names = [spec.name for spec in self.specs]
         self.assertEqual(len(names), len(set(names)))

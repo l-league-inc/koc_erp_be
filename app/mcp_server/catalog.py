@@ -82,6 +82,14 @@ PUBLIC_ENDPOINTS = frozenset(
         ("GET", "/api/v1/mail/messages"),
         ("GET", "/api/v1/mail/messages/{uid}"),
         ("POST", "/api/v1/mail/send"),
+        ("POST", "/api/v1/estimate/documents/json"),
+        ("POST", "/api/v1/estimate/documents/from-instruction/json"),
+    }
+)
+ESTIMATE_POSTS = frozenset(
+    {
+        ("POST", "/api/v1/estimate/documents/json"),
+        ("POST", "/api/v1/estimate/documents/from-instruction/json"),
     }
 )
 OPEN_WORLD_POSTS = frozenset()
@@ -351,6 +359,12 @@ def tool_safety(method: str, path: str) -> dict[str, Any]:
             "open_world_justification": "다른 사용자가 볼 수 있는 글이나 댓글을 게시합니다.",
             "destructive_justification": "플러그인에는 삭제 도구가 없어 게시된 글을 이 연결로 되돌릴 수 없습니다.",
         }
+    elif key in ESTIMATE_POSTS:
+        justifications = {
+            "read_only_justification": "견적서 파일을 만들어 반환하며 견적 레코드나 저장소에는 쓰지 않습니다.",
+            "open_world_justification": "KOC ERP API만 호출하고 공개 인터넷에 글을 올리지 않습니다.",
+            "destructive_justification": "기존 데이터를 지우거나 덮어쓰지 않고 결제하지 않습니다.",
+        }
     else:
         justifications = {
             "read_only_justification": "연결된 계정의 데이터에 기록을 저장하므로 조회 전용이 아닙니다.",
@@ -380,6 +394,12 @@ def _description(method: str, path: str, summary: str, detail: str) -> str:
     if (method, path) in VIEW_COUNT_GETS:
         lines.append(
             "이 조회는 해당 글의 공개 조회수를 1 올립니다. 글 내용과 댓글은 바꾸지 않습니다."
+        )
+    if (method, path) in ESTIMATE_POSTS:
+        lines.append(
+            "응답의 docx_base64가 견적서 파일입니다. 공급가액, 부가세, 합계는 서버가 계산한 값입니다. "
+            "금액 키를 보내지 않습니다. 장비는 6대까지이고 한 대는 부품 한 줄과 작업시간 한 줄입니다. "
+            "말하지 않은 단가는 만들지 않습니다. 견적 레코드는 저장하지 않습니다."
         )
     if method == "POST":
         lines.append("이 호출은 데이터를 만들 수 있습니다. 실패해도 자동으로 다시 호출하지 않습니다.")

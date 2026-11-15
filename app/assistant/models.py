@@ -51,7 +51,7 @@ class AgentMessage(CommonModel):
 
 
 class ProposedAction(CommonModel):
-    """확정 전에 멈춰 둔 레코드·스킬 생성·수정입니다."""
+    """확정 전에 멈춰 둔 레코드·스킬·메일·견적서 초안입니다."""
 
     class Kind(models.TextChoices):
         CREATE_RECORD = ("create_record", "레코드 생성")
@@ -59,6 +59,7 @@ class ProposedAction(CommonModel):
         CREATE_SKILL = ("create_skill", "스킬 생성")
         UPDATE_SKILL = ("update_skill", "스킬 수정")
         SEND_MAIL = ("send_mail", "메일 발송")
+        CREATE_ESTIMATE = ("create_estimate", "견적서 작성")
 
     class Status(models.TextChoices):
         PENDING = ("pending", "대기")

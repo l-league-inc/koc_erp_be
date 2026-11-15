@@ -42,7 +42,9 @@ def build_mcp_http(django_app: Any) -> tuple[Any, Any]:
         name="koc_erp",
         instructions=(
             "KOC ERP API입니다. 호출자의 JWT에 묶인 데이터만 조회하거나 생성합니다. "
-            "결제, 로그인, 삭제, 주문 생성, 관리자 기능은 제공하지 않습니다."
+            "결제, 로그인, 삭제, 주문 생성, 관리자 기능은 제공하지 않습니다. "
+            "견적서는 견적서 JSON 작성 도구로 만들고 docx_base64를 파일로 해석합니다. "
+            "합계는 서버가 계산한 값을 씁니다."
         ),
     )
     for spec in build_catalog():

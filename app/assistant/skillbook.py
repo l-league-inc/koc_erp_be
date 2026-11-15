@@ -14,6 +14,7 @@ BUNDLED_NAMES = (
     "attendance",
     "schedule",
     "quote",
+    "estimate",
     "travel",
     "after_service",
     "mail",

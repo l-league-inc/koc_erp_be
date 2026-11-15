@@ -156,6 +156,16 @@ class DocumentIndexTests(TestCase):
         finally:
             os.remove(path)
 
+    def test_extract_reads_hwp_and_hwpx(self):
+        from document.indexer import extract_text
+
+        root = os.path.join(os.path.dirname(__file__), "fixtures")
+        hwp = os.path.join(root, "check.hwp")
+        hwpx = os.path.join(root, "check.hwpx")
+        self.assertIn("현장 점검표", extract_text(hwp, "application/x-hwp", "check.hwp"))
+        self.assertIn("현장 점검표", extract_text(hwp, "application/octet-stream", "check.hwp"))
+        self.assertIn("현장 점검표", extract_text(hwpx, "application/vnd.hancom.hwpx", "check.hwpx"))
+
 
 class DocumentSearchIsolationTests(TestCase):
     def setUp(self):

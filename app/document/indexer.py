@@ -28,6 +28,16 @@ STALE_PROCESSING = timedelta(minutes=15)
 _RETRY_DELAYS = (30, 60, 120)
 
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_HWP_MIMES = {
+    "application/x-hwp",
+    "application/haansofthwp",
+    "application/vnd.hancom.hwp",
+    "application/x-hwp-v5",
+}
+_HWPX_MIMES = {
+    "application/vnd.hancom.hwpx",
+    "application/hwp+zip",
+}
 _TEXT_EXTENSIONS = {".txt", ".md", ".csv"}
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".heif", ".tif", ".tiff"}
 _AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".wma", ".m4b"}
@@ -74,6 +84,9 @@ def extract_text(path: str, content_type: str, filename: str) -> str | None:
         return _extract_pdf(path)
     if mime == _DOCX_MIME or ext == ".docx":
         return _extract_docx(path)
+    bare_mime = mime.split(";", 1)[0].strip()
+    if ext in {".hwp", ".hwpx"} or bare_mime in _HWP_MIMES or bare_mime in _HWPX_MIMES:
+        return _extract_hwp(path)
     if mime.startswith("text/") or ext in _TEXT_EXTENSIONS:
         with open(path, encoding="utf-8", errors="replace") as handle:
             return handle.read()
@@ -93,6 +106,12 @@ def _extract_docx(path: str) -> str:
 
     document = Document(path)
     return "\n".join(paragraph.text for paragraph in document.paragraphs if paragraph.text.strip())
+
+
+def _extract_hwp(path: str) -> str:
+    import syhwp
+
+    return syhwp.extract_text(path)
 
 
 def summarize(text: str) -> tuple[str, str]:
@@ -586,6 +605,15 @@ def _skipped_media_q() -> Q:
     return Q(index__index_status=DocumentIndex.Status.SKIPPED) & (mime | names)
 
 
+def _skipped_hwp_q() -> Q:
+    """이전에 제외된 한글 문서를 다시 색인 대상에 넣습니다."""
+    return Q(index__index_status=DocumentIndex.Status.SKIPPED) & (
+        Q(original_filename__iendswith=".hwp")
+        | Q(original_filename__iendswith=".hwpx")
+        | Q(content_type__in=sorted(_HWP_MIMES | _HWPX_MIMES))
+    )
+
+
 def pending_shared_file_ids(*, limit: int | None = None) -> list[int]:
     """언어 모델 색인이 아직 없는 공유 파일 id를 반환합니다."""
     cutoff = timezone.now() - STALE_PROCESSING
@@ -604,6 +632,7 @@ def pending_shared_file_ids(*, limit: int | None = None) -> list[int]:
                 index__updated_at__lt=cutoff,
             )
             | _skipped_media_q()
+            | _skipped_hwp_q()
         )
         .order_by("id")
         .values_list("id", flat=True)

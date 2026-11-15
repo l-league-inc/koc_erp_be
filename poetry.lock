@@ -1801,6 +1801,21 @@ files = [
 ]
 
 [[package]]
+name = "olefile"
+version = "0.47"
+description = "Python package to parse, read and write Microsoft OLE2 files (Structured Storage or Compound Document, Microsoft Office)"
+optional = false
+python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
+groups = ["main"]
+files = [
+    {file = "olefile-0.47-py2.py3-none-any.whl", hash = "sha256:543c7da2a7adadf21214938bb79c83ea12b473a4b6ee4ad4bf854e7715e13d1f"},
+    {file = "olefile-0.47.zip", hash = "sha256:599383381a0bf3dfbd932ca0ca6515acd174ed48870cbf7fee123d698c192c1c"},
+]
+
+[package.extras]
+tests = ["pytest", "pytest-cov"]
+
+[[package]]
 name = "openai"
 version = "1.55.1"
 description = "The official Python library for the openai API"
@@ -3076,6 +3091,25 @@ typing-extensions = {version = ">=4.10.0", markers = "python_version < \"3.13\""
 full = ["httpx (>=0.27.0,<0.29.0)", "httpx2 (>=2.0.0)", "itsdangerous", "jinja2", "opentelemetry-api", "python-multipart (>=0.0.18)", "pyyaml"]
 
 [[package]]
+name = "syhwp"
+version = "0.0.8"
+description = "Read Korean HWP and HWPX (Hancom Office / 한글) documents in pure Python — text, tables, Markdown, HTML."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "syhwp-0.0.8-py3-none-any.whl", hash = "sha256:cc34d3f46abe7cc13b5f718f719a4d028a20f37a4aad811294de256784448c6b"},
+    {file = "syhwp-0.0.8.tar.gz", hash = "sha256:d5d3d4962e49d4372e436cce21b11a25013cbb2cb3b36d7410759d4ca6387e43"},
+]
+
+[package.dependencies]
+olefile = ">=0.46"
+
+[package.extras]
+fast = ["cryptography (>=42)"]
+test = ["cryptography (>=42)", "pytest (>=7)"]
+
+[[package]]
 name = "tqdm"
 version = "4.67.1"
 description = "Fast, Extensible Progress Meter"
@@ -3413,4 +3447,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "22bc45a5ffdbc1ee132da8e263ed7e4cee7e4891d89c7ea0780e14d501834530"
+content-hash = "4b7801899bbf08535ac5dce0e7d8266327b566451928999aba544e313e1f0f08"

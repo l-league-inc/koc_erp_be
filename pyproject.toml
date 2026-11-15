@@ -37,6 +37,7 @@ markdown = "^3.8"
 mcp = "^2.3.0"
 pypdf = "^5.1.0"
 python-docx = "^1.1.2"
+syhwp = "^0.0.8"
 
 
 [tool.poetry.group.dev.dependencies]

@@ -93,6 +93,8 @@ class PendingSharedFileTests(TestCase):
         self._set_index(skipped_id, index_status=DocumentIndex.Status.SKIPPED)
         archive_id = self._register(self.shared_root, "archive.zip", "application/zip")
         self._set_index(archive_id, index_status=DocumentIndex.Status.SKIPPED)
+        hwp_id = self._register(self.shared_root, "점검.hwp", "application/x-hwp")
+        self._set_index(hwp_id, index_status=DocumentIndex.Status.SKIPPED)
         fresh_id = self._register(self.shared_root, "fresh.txt")
         self._set_index(fresh_id, index_status=DocumentIndex.Status.PROCESSING)
         stale_id = self._register(self.shared_root, "stale.txt")
@@ -107,7 +109,7 @@ class PendingSharedFileTests(TestCase):
 
         self.assertEqual(
             pending_shared_file_ids(),
-            [pending_id, failed_id, skipped_id, stale_id, missing_id],
+            [pending_id, failed_id, skipped_id, hwp_id, stale_id, missing_id],
         )
         found = pending_shared_file_ids()
         self.assertNotIn(personal_id, found)

@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -47,6 +48,8 @@ _MAX_VISION_EDGE = 1600
 _AUDIO_SAMPLE_SECONDS = 180
 _VIDEO_FRAME_COUNT = 4
 _WHISPER_MODEL = "whisper-1"
+_ILLEGAL_TEXT = re.compile(r"[\x00\ud800-\udfff]")
+_ENCRYPTED_PDF_ERROR = "암호가 걸린 PDF라 본문을 읽지 못했습니다."
 
 _SYSTEM_PROMPT = """당신은 회사 문서 검색 색인을 만드는 도우미입니다.
 문서 본문을 읽고 검색에 쓸 한국어 요약과 태그를 만듭니다.
@@ -61,6 +64,15 @@ _IMAGE_PROMPT = """당신은 회사 파일 검색 색인을 만드는 도우미�
 {"description_ko": "3문장 이내 설명", "tags_ko": ["태그1", "태그2"]}
 tags_ko는 피사체, 장소, 분위기, 적힌 글자 등 10개 이내의 배열입니다.
 """
+
+
+class EncryptedPdfError(Exception):
+    """사용자 암호가 걸려 본문을 읽지 못하는 PDF입니다."""
+
+
+def _db_text(value: str) -> str:
+    """PostgreSQL 텍스트에 넣을 수 없는 NUL과 서로게이트를 제거합니다."""
+    return _ILLEGAL_TEXT.sub("", value)
 
 
 def media_kind(content_type: str, filename: str) -> str | None:
@@ -89,29 +101,36 @@ def extract_text(path: str, content_type: str, filename: str) -> str | None:
         return _extract_hwp(path)
     if mime.startswith("text/") or ext in _TEXT_EXTENSIONS:
         with open(path, encoding="utf-8", errors="replace") as handle:
-            return handle.read()
+            return _db_text(handle.read())
     return None
 
 
 def _extract_pdf(path: str) -> str:
     from pypdf import PdfReader
+    from pypdf.errors import FileNotDecryptedError
 
     reader = PdfReader(path)
-    parts = [(page.extract_text() or "") for page in reader.pages]
-    return "\n".join(parts)
+    if reader.is_encrypted and reader.decrypt("") == 0:
+        raise EncryptedPdfError(_ENCRYPTED_PDF_ERROR)
+    try:
+        parts = [(page.extract_text() or "") for page in reader.pages]
+    except FileNotDecryptedError as exc:
+        raise EncryptedPdfError(_ENCRYPTED_PDF_ERROR) from exc
+    return _db_text("\n".join(parts))
 
 
 def _extract_docx(path: str) -> str:
     from docx import Document
 
     document = Document(path)
-    return "\n".join(paragraph.text for paragraph in document.paragraphs if paragraph.text.strip())
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs if paragraph.text.strip())
+    return _db_text(text)
 
 
 def _extract_hwp(path: str) -> str:
     import syhwp
 
-    return syhwp.extract_text(path)
+    return _db_text(syhwp.extract_text(path))
 
 
 def summarize(text: str) -> tuple[str, str]:
@@ -412,6 +431,12 @@ def build_index(file_id: int) -> None:
     """문서를 받아 추출 본문과 검색 벡터를 저장합니다."""
     try:
         _build_index(file_id)
+    except EncryptedPdfError as exc:
+        logger.info("document index skipped encrypted pdf file_id=%s", file_id)
+        DocumentIndex.objects.filter(file_id=file_id).update(
+            index_status=DocumentIndex.Status.SKIPPED,
+            error=str(exc),
+        )
     except Exception:
         logger.exception("document index failed file_id=%s", file_id)
         DocumentIndex.objects.filter(file_id=file_id).update(
@@ -499,7 +524,7 @@ def _build_index(file_id: int) -> None:
         )
         return
 
-    text = extracted.strip()
+    text = _db_text(extracted.strip())
     if personal or len(text) < MIN_LLM_CHARS:
         _save_index(
             index,
@@ -548,12 +573,12 @@ def _save_index(
     status: str,
     error: str,
 ) -> None:
-    index.extracted_text = extracted_text
-    index.description_ko = description
-    index.tags_ko = tags
+    index.extracted_text = _db_text(extracted_text)
+    index.description_ko = _db_text(description)
+    index.tags_ko = _db_text(tags)
     index.index_source = source
     index.index_status = status
-    index.error = error
+    index.error = _db_text(error)
     index.save(
         update_fields=[
             "extracted_text",

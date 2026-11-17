@@ -48,7 +48,7 @@ audience: frontend
 
 파일 항목은 `id`, `workspace_id`, `space_id`, `space_kind`, `folder_id`, `original_filename`, `content_type`, `size`, `uploaded_by_id`, `path`, `index_status`, `index_source`, `description_ko`, `tags_ko`, `content_hash`, `created_at`, `updated_at`입니다. 상세만 `extracted_text`, `error`가 있습니다. 같은 폴더의 파일 이름은 하나만 허용합니다.
 
-`index_status`는 `pending`, `processing`, `ready`, `failed`, `skipped`입니다. `index_source`는 `local` 또는 `llm`입니다. 공유 문서함의 PDF, DOCX, HWP, HWPX, txt, md, csv는 본문을 추출한 뒤 언어 모델로 요약합니다. 암호가 걸린 한글 문서는 읽지 못해 색인이 실패합니다. 공유 문서함의 이미지는 장면을 설명하고, 영상은 중간 장면을 설명하고, 오디오는 앞부분을 전사한 뒤 요약합니다. 개인 문서함은 본문을 추출할 수 있는 파일만 저장하고 언어 모델을 호출하지 않습니다. 그 외 형식은 `skipped`입니다.
+`index_status`는 `pending`, `processing`, `ready`, `failed`, `skipped`입니다. `index_source`는 `local` 또는 `llm`입니다. 공유 문서함의 PDF, DOCX, HWP, HWPX, txt, md, csv는 본문을 추출한 뒤 언어 모델로 요약합니다. 본문의 NUL과 서로게이트는 제거한 뒤 저장합니다. 암호가 걸린 PDF는 빈 암호로 한 번 연 뒤, 열리지 않으면 `skipped`이고 `error`는 `암호가 걸린 PDF라 본문을 읽지 못했습니다.`입니다. 암호가 걸린 한글 문서는 읽지 못해 색인이 실패합니다. 공유 문서함의 이미지는 장면을 설명하고, 영상은 중간 장면을 설명하고, 오디오는 앞부분을 전사한 뒤 요약합니다. 개인 문서함은 본문을 추출할 수 있는 파일만 저장하고 언어 모델을 호출하지 않습니다. 그 외 형식은 `skipped`입니다.
 
 검색 항목은 `id`, `original_filename`, `folder_id`, `folder_path`, `description_ko`, `score`입니다. 공유 문서와 내 개인 문서만 나옵니다.
 

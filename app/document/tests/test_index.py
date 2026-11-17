@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from document.indexer import build_index
+from document.indexer import EncryptedPdfError, build_index, extract_text
 from document.models import DocumentIndex, DocumentSpace
 from document.storage import build_object_key
 from document.utils import create_file, create_folder, ensure_spaces
@@ -74,6 +74,35 @@ class DocumentIndexTests(TestCase):
         self.assertEqual(index.index_status, DocumentIndex.Status.READY)
         self.assertEqual(index.description_ko, "연차 요약")
         self.assertEqual(index.tags_ko, "연차,규정")
+
+    def test_shared_index_drops_nul_and_surrogates(self):
+        file_id = self._register(self.shared_root, "dirty.txt", "text/plain")
+        with (
+            patch("document.indexer.download_to_temp", return_value="/tmp/missing-dirty.txt"),
+            patch("document.indexer.extract_text", return_value="현장\x00점검\ud800표 본문입니다"),
+            patch("document.indexer.summarize", return_value=("현장 요약", "현장")) as summarize,
+        ):
+            build_index(file_id)
+        self.assertEqual(summarize.call_args.args[0], "현장점검표 본문입니다")
+        index = DocumentIndex.objects.get(file_id=file_id)
+        self.assertEqual(index.index_status, DocumentIndex.Status.READY)
+        self.assertEqual(index.extracted_text, "현장점검표 본문입니다")
+
+    def test_encrypted_pdf_is_skipped(self):
+        file_id = self._register(self.shared_root, "secret.pdf", "application/pdf")
+        with (
+            patch("document.indexer.download_to_temp", return_value="/tmp/missing-secret.pdf"),
+            patch(
+                "document.indexer.extract_text",
+                side_effect=EncryptedPdfError("암호가 걸린 PDF라 본문을 읽지 못했습니다."),
+            ),
+            patch("document.indexer.summarize") as summarize,
+        ):
+            build_index(file_id)
+        summarize.assert_not_called()
+        index = DocumentIndex.objects.get(file_id=file_id)
+        self.assertEqual(index.index_status, DocumentIndex.Status.SKIPPED)
+        self.assertEqual(index.error, "암호가 걸린 PDF라 본문을 읽지 못했습니다.")
 
     def test_unknown_file_is_skipped(self):
         file_id = self._register(self.shared_root, "archive.zip", "application/zip")
@@ -165,6 +194,46 @@ class DocumentIndexTests(TestCase):
         self.assertIn("현장 점검표", extract_text(hwp, "application/x-hwp", "check.hwp"))
         self.assertIn("현장 점검표", extract_text(hwp, "application/octet-stream", "check.hwp"))
         self.assertIn("현장 점검표", extract_text(hwpx, "application/vnd.hancom.hwpx", "check.hwpx"))
+
+    def test_extract_drops_nul_in_text_file(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8") as handle:
+            handle.write("발전기\x00내역")
+            path = handle.name
+        try:
+            self.assertEqual(extract_text(path, "text/csv", "units.csv"), "발전기내역")
+        finally:
+            os.remove(path)
+
+    def test_extract_pdf_opens_with_empty_password(self):
+        class Page:
+            def extract_text(self):
+                return "건강\x00보험"
+
+        class Reader:
+            is_encrypted = True
+            pages = [Page()]
+
+            def decrypt(self, password):
+                self.password = password
+                return 1
+
+        reader = Reader()
+        with patch("pypdf.PdfReader", return_value=reader):
+            text = extract_text("/tmp/health.pdf", "application/pdf", "health.pdf")
+        self.assertEqual(reader.password, "")
+        self.assertEqual(text, "건강보험")
+
+    def test_extract_pdf_rejects_user_password(self):
+        class Reader:
+            is_encrypted = True
+            pages = []
+
+            def decrypt(self, password):
+                return 0
+
+        with patch("pypdf.PdfReader", return_value=Reader()):
+            with self.assertRaises(EncryptedPdfError):
+                extract_text("/tmp/locked.pdf", "application/pdf", "locked.pdf")
 
 
 class DocumentSearchIsolationTests(TestCase):

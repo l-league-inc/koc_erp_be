@@ -85,6 +85,12 @@ PUBLIC_ENDPOINTS = frozenset(
         ("POST", "/api/v1/estimate/documents/json"),
         ("POST", "/api/v1/estimate/documents/from-instruction/json"),
         ("POST", "/api/v1/estimate/documents/pdf/json"),
+        ("POST", "/api/v1/search"),
+    }
+)
+SEARCH_POSTS = frozenset(
+    {
+        ("POST", "/api/v1/search"),
     }
 )
 ESTIMATE_POSTS = frozenset(
@@ -340,10 +346,17 @@ def tool_safety(method: str, path: str) -> dict[str, Any]:
     """OpenAI 심사에 필요한 hint와 한 문장 justification입니다."""
     key = (method, path)
     view_count = key in VIEW_COUNT_GETS
-    open_world = key in OPEN_WORLD_POSTS
-    destructive = open_world or key in DESTRUCTIVE_WRITES
-    read_only = method == "GET" and not view_count
-    if view_count:
+    search = key in SEARCH_POSTS
+    open_world = key in OPEN_WORLD_POSTS or search
+    destructive = key in OPEN_WORLD_POSTS or key in DESTRUCTIVE_WRITES
+    read_only = (method == "GET" and not view_count) or search
+    if search:
+        justifications = {
+            "read_only_justification": "웹을 검색해 결과만 돌려주며 워크스페이스에는 쓰지 않습니다.",
+            "open_world_justification": "공개 웹을 조회합니다. 글이나 댓글을 게시하지 않습니다.",
+            "destructive_justification": "기존 데이터를 지우거나 덮어쓰지 않습니다.",
+        }
+    elif view_count:
         justifications = {
             "read_only_justification": "글 내용은 바꾸지 않지만 공개 조회수를 1 올립니다.",
             "open_world_justification": "새 글을 올리지 않고 해당 글의 조회 횟수만 증가합니다.",
@@ -412,7 +425,12 @@ def _description(method: str, path: str, summary: str, detail: str) -> str:
                 "장비는 6대까지이고 한 대는 부품 한 줄과 작업시간 한 줄입니다. "
                 "말하지 않은 단가는 만들지 않습니다. 견적 레코드는 저장하지 않습니다."
             )
-    if method == "POST":
+    if (method, path) in SEARCH_POSTS:
+        lines.append(
+            "응답 results는 title, url, content, score입니다. 워크스페이스에 저장하지 않습니다. "
+            "검색어는 400자 이하입니다. 실패해도 자동으로 다시 호출하지 않습니다."
+        )
+    elif method == "POST":
         lines.append("이 호출은 데이터를 만들 수 있습니다. 실패해도 자동으로 다시 호출하지 않습니다.")
     if method == "PATCH":
         lines.append("이 호출은 레코드 값을 수정합니다. 레코드를 지우지는 않습니다.")

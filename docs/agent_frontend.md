@@ -5,11 +5,11 @@ audience: frontend
 
 # 업무 대화 API
 
-홈 입력창과 출근, 일정, 견적, 출장, A/S, 메일 단축은 같은 API를 씁니다. 단축도 같은 대화로 들어가고, 서버가 고정 스킬을 골라 처리합니다. 인증은 기존 JWT입니다.
+홈 입력창과 출근, 일정, 견적, 출장, A/S, 메일, 외부 검색 단축은 같은 API를 씁니다. 단축도 같은 대화로 들어가고, 서버가 고정 스킬을 골라 처리합니다. 인증은 기존 JWT입니다.
 
 모델 호출은 서버가 합니다. 사용자는 OpenAI 3개와 Anthropic 3개 중에서 고르고, 그 선택은 업무 대화와 워크봇 초안에 함께 쓰입니다. 프롬프트에는 스킬 이름과 설명만 들어가고, 맞는 스킬의 절차는 그때 읽습니다. 레코드와 스킬의 생성·수정, 메일 발송과 견적서 파일은 초안으로 돌아오고, 사용자가 확정한 뒤에만 저장·발송·생성됩니다.
 
-고정 스킬이 만드는 레코드 초안의 `database_slug`는 출근 `attendance`, 일정 `tasks`, 견적 `quotes`, 출장 `trip`, A/S `after_service`입니다. 메일 고정 스킬 이름은 `mail`이며 레코드가 아니라 Daum 메일을 읽고 발송 초안을 만듭니다. 견적서 파일 고정 스킬 이름은 `estimate`이며 레코드가 아니라 양식 docx 초안을 만듭니다. 임직원·거래처 칸은 그 레코드 id 배열입니다. 대화 `database_slug`가 한 영역이면 조회는 그 영역의 관계 대상까지 되고, 생성 초안은 그 영역만 됩니다.
+고정 스킬이 만드는 레코드 초안의 `database_slug`는 출근 `attendance`, 일정 `tasks`, 견적 `quotes`, 출장 `trip`, A/S `after_service`입니다. 메일 고정 스킬 이름은 `mail`이며 레코드가 아니라 Daum 메일을 읽고 발송 초안을 만듭니다. 견적서 파일 고정 스킬 이름은 `estimate`이며 레코드가 아니라 양식 docx 초안을 만듭니다. 외부 검색 고정 스킬 이름은 `web_search`이며 레코드를 만들지 않고 웹 결과와 출처 URL을 안내합니다. 보고 페이지가 필요하면 생성 초안입니다. 임직원·거래처 칸은 그 레코드 id 배열입니다. 대화 `database_slug`가 한 영역이면 조회는 그 영역의 관계 대상까지 되고, 생성 초안은 그 영역만 됩니다.
 
 ## 유저 플로우
 
@@ -62,11 +62,13 @@ audience: frontend
 
 초안 `kind`는 `create_record`, `update_record`, `create_skill`, `update_skill`, `send_mail`, `create_estimate`입니다. 레코드 `payload`는 워크스페이스 레코드 생성·수정과 같은 쓰기 모양이고, 생성은 `database_slug`를 포함합니다. 관계 값은 레코드 id 배열입니다. 서버가 조회 도구로 읽는 관계 값은 `{id, title, database_id, database_slug}`이지만, 이 조회 결과는 화면 초안에 실리지 않습니다. 확정 뒤 레코드를 다시 조회하면 읽기 모양이 나옵니다. 페이지 데이터베이스의 임직원·거래처 칸도 레코드 id 배열입니다. `seed_koc_workspace` 여섯 영역의 `owner`만 `GET /api/v1/workspace/{workspace_id}/member`의 `user_id` 배열입니다.
 
-스킬 생성 `payload`는 `name`, `description`, `body`, `enabled`입니다. 수정 `payload`는 `name`과 바뀐 `description`, `body`, `enabled`입니다. `name`은 영문 소문자로 시작하고 숫자와 `_`만 씁니다. 고정 스킬 이름 `attendance`, `schedule`, `quote`, `estimate`, `travel`, `after_service`, `mail`는 만들거나 고칠 수 없습니다.
+스킬 생성 `payload`는 `name`, `description`, `body`, `enabled`입니다. 수정 `payload`는 `name`과 바뀐 `description`, `body`, `enabled`입니다. `name`은 영문 소문자로 시작하고 숫자와 `_`만 씁니다. 고정 스킬 이름 `attendance`, `schedule`, `quote`, `estimate`, `travel`, `after_service`, `mail`, `web_search`는 만들거나 고칠 수 없습니다.
 
 견적서 `payload`는 `client`, `department`, `contact`, `issued_on`, `product_name`, `devices`, 선택 `shipping_qty`, `shipping_unit_price`입니다. `devices` 항목은 `serial`, `part_name`, `part_qty`, `part_unit_price`, `labor_level`(`상`/`하`), `labor_hours`, `labor_unit_price`이고 선택 `part_unit`입니다. 금액 키는 없습니다. 확정 전 `result`는 비어 있습니다.
 
 메일 발송 `payload`는 `to`(이메일 배열), `subject`, `body`이고, 선택으로 `cc`, `bcc`입니다. 메일 계정 연결은 `/api/v1/mail`을 씁니다.
+
+외부 검색은 `POST /api/v1/search`입니다. 본문은 `query`가 필수이고, 선택으로 `max_results`(1–8, 기본 5), `time_range`(`day`/`week`/`month`/`year`), `include_domains`(도메인 배열), `topic`(`general`/`news`)입니다. 응답은 `query`와 `results`이고, 항목은 `title`, `url`, `content`, `score`입니다. 워크스페이스에 저장하지 않습니다. 같은 API가 MCP 도구로도 열립니다. 업무 대화에서는 고정 스킬 `web_search`가 `web_search` 도구로 이 검색을 하고, 페이지가 필요하면 생성 초안을 만듭니다.
 
 대화 목록 항목은 `id`, `workspace_id`, `database_slug`, `preview`, `created_at`, `updated_at`입니다. 상세는 여기에 `messages`, `proposed_actions`가 있습니다. 메시지는 `id`, `role`(`user`/`assistant`), `content`, `created_at`입니다. 초안은 `id`, `kind`, `status`(`pending`/`confirmed`/`rejected`), `payload`, `result`입니다. 메시지 전송 응답은 `message`, `proposed_actions`입니다. 확정 응답은 `proposed_actions`, `records`, `skills`, `mails`, `estimates`입니다. `records` 항목은 `action_id`, `record_id`, `database_id`, `title`입니다. `database_id`로 해당 데이터베이스의 레코드 목록 캐시만 무효화할 수 있습니다. `skills` 항목은 `action_id`, `skill_id`, `name`입니다. `mails` 항목은 `action_id`, `sender`, `to`, `cc`, `bcc`, `subject`입니다. `estimates` 항목은 `action_id`, `filename`, `content_type`, `supply_amount`, `vat`, `total`, `draft`, `docx_base64`입니다. `draft`는 견적서 편집 폼에 다시 넣는 초안입니다. 해당 종류가 없으면 빈 배열입니다. 확정된 견적서의 같은 값은 초안 `result`에도 남습니다.
 

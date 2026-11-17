@@ -210,3 +210,23 @@ class WorkbotStatsResponseSchema(Schema):
     month_run_count: int
     success_rate: float
     saved_minutes: int
+
+
+class WebSearchRequestSchema(Schema):
+    query: str
+    max_results: Optional[int] = None
+    time_range: str = ""
+    include_domains: list[str] = []
+    topic: str = ""
+
+
+class WebSearchResultSchema(Schema):
+    title: str
+    url: str
+    content: str
+    score: Optional[float] = None
+
+
+class WebSearchResponseSchema(Schema):
+    query: str
+    results: list[WebSearchResultSchema]

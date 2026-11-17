@@ -32,8 +32,11 @@ from assistant.schemas import (
     WorkbotStatsResponseSchema,
     WorkbotUpdateSchema,
     WorkbotWriteSchema,
+    WebSearchRequestSchema,
+    WebSearchResponseSchema,
 )
 from assistant.skillbook import create_skill, delete_skill, list_skills, update_skill
+from assistant.web_search import search_web
 from assistant.workbot import (
     confirm_run,
     create_workbot,
@@ -48,6 +51,29 @@ from assistant.workbot import (
 
 agent_router = Router(tags=["Agent"])
 workbot_router = Router(tags=["Workbot"])
+search_router = Router(tags=["Search"])
+
+
+@search_router.post(
+    "/",
+    summary="[C] 외부 검색 조회",
+    description=(
+        "회사 밖에 있는 최신 정보를 검색합니다. "
+        "정부지원사업, 공고, 뉴스, 법령처럼 워크스페이스에 없는 사실을 확인할 때 씁니다. "
+        "결과는 title, url, content, score이고 워크스페이스에 저장하지 않습니다. "
+        "검색어는 400자 이하입니다."
+    ),
+    response=WebSearchResponseSchema,
+    auth=jwt_auth,
+)
+async def web_search_api(request, payload: WebSearchRequestSchema):
+    return await sync_to_async(search_web)(
+        payload.query,
+        max_results=payload.max_results,
+        time_range=payload.time_range or None,
+        include_domains=payload.include_domains or None,
+        topic=payload.topic or None,
+    )
 
 
 @agent_router.get(

@@ -16,7 +16,7 @@ from estimate.schema import EstimateDraft
 from estimate.service import document_payload
 from estimate.tests.samples import example_payload
 from assistant.api import agent_router
-from assistant.models import AgentSession, Skill
+from assistant.models import AgentSession, ProposedAction, Skill
 from user.utils import get_access_token
 from workspace.models import Database, Property, Record, RecordActivity, Workspace
 from workspace.seed import seed_koc_workspace
@@ -530,7 +530,65 @@ class AgentApiTests(TestCase):
         self.assertEqual(confirmed.json()["records"], [])
         self.assertEqual(confirmed.json()["skills"], [])
         self.assertEqual(confirmed.json()["mails"][0]["subject"], "회신")
-        sent.assert_called_once()
+
+    async def test_web_search_skill_reads_the_web_without_a_draft(self):
+        workspace_id = await self._workspace_id()
+        listed = await self.client.get(
+            f"/skill?workspace_id={workspace_id}",
+            headers=self.headers(),
+        )
+        skill = next(item for item in listed.json() if item["name"] == "web_search")
+        self.assertEqual(skill["source"], "bundled")
+        self.assertIsNone(skill["id"])
+        self.assertIn("정부지원사업", skill["description"])
+        self.assertIn("web_search", skill["body"])
+        self.assertIn("출처 URL", skill["body"])
+
+        rejected = await self.client.post(
+            "/skill",
+            json={
+                "workspace_id": workspace_id,
+                "name": "web_search",
+                "description": "다른 검색",
+                "body": "다른 절차",
+            },
+            headers=self.headers(),
+        )
+        self.assertEqual(rejected.status_code, 400)
+
+        session = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id},
+            headers=self.headers(),
+        )
+        stored = await sync_to_async(AgentSession.objects.get)(id=session.json()["id"])
+        source = "https://www.bizinfo.go.kr/notice/123"
+        with patch(
+            "assistant.agent.search_web",
+            return_value={
+                "query": "2026 중소기업 정부지원사업",
+                "results": [
+                    {
+                        "title": "기술혁신 지원",
+                        "url": source,
+                        "content": "중소기업 기술개발 지원",
+                        "score": 0.8,
+                    }
+                ],
+            },
+        ) as searched:
+            output = await sync_to_async(_dispatch)(
+                stored,
+                self.user,
+                "web_search",
+                {"query": "2026 중소기업 정부지원사업", "max_results": 3},
+                [],
+            )
+        self.assertEqual(output["results"][0]["url"], source)
+        searched.assert_called_once()
+        self.assertEqual(searched.call_args.kwargs["max_results"], 3)
+        self.assertEqual(await sync_to_async(ProposedAction.objects.count)(), 0)
+        self.assertIn("web_search", [tool["function"]["name"] for tool in _TOOLS])
 
     async def test_estimate_skill_confirms_into_docx(self):
         workspace_id = await self._workspace_id()

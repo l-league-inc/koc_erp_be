@@ -167,6 +167,7 @@ class WorkbotApiTests(TestCase):
             self.assertEqual(model, "claude-haiku-5-5")
             system = messages[0]["content"]
             self.assertIn("한국어로만 작성합니다", system)
+            self.assertIn("정부지원사업", system)
             self.assertIn("hr (", system)
             self.assertIn("status:", system)
             return {

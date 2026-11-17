@@ -97,6 +97,84 @@ class WorkbotSchedulerTests(TestCase):
         bot.refresh_from_db()
         self.assertIsNotNone(bot.next_run_at)
 
+    def test_agent_searches_web_then_writes_report_with_source(self):
+        source = "https://www.bizinfo.go.kr/notice/123"
+        bot = self._bot(
+            self._agent_spec(message="정부지원사업"),
+            name="정부지원사업 조사",
+            instruction="이번 달 정부지원사업을 검색해서 보고 페이지를 만들어줘",
+            database_slug="gov",
+        )
+        calls = {"n": 0, "names": []}
+
+        def fake(messages, tools, model=""):
+            calls["n"] += 1
+            calls["names"] = [tool["function"]["name"] for tool in tools]
+            if calls["n"] == 1:
+                self.assertIn("web_search", messages[0]["content"])
+                return {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "s1",
+                            "name": "web_search",
+                            "arguments": {"query": "2026년 중소기업 정부지원사업"},
+                        }
+                    ],
+                }
+            if calls["n"] == 2:
+                self.assertIn(source, messages[-1]["content"])
+                return {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "name": "create_record",
+                            "arguments": {
+                                "database_slug": "gov",
+                                "title": "2026년 11월 정부지원사업",
+                                "values": {},
+                                "blocks": [
+                                    {"type": "heading_2", "content": {"text": "기술혁신 지원"}},
+                                    {
+                                        "type": "paragraph",
+                                        "content": {"text": f"중소기업 기술혁신 지원. 출처 {source}"},
+                                    },
+                                ],
+                            },
+                        }
+                    ],
+                }
+            return {"content": "정부지원사업 보고서를 만들었습니다.", "tool_calls": []}
+
+        with (
+            patch("assistant.workbot_agent.llm.complete", fake),
+            patch(
+                "assistant.workbot_agent.search_web",
+                return_value={
+                    "query": "2026년 중소기업 정부지원사업",
+                    "results": [
+                        {
+                            "title": "기술혁신 지원",
+                            "url": source,
+                            "content": "중소기업 기술개발 지원",
+                            "score": 0.8,
+                        }
+                    ],
+                },
+            ) as searched,
+        ):
+            self.assertEqual(run_due_workbots(), 1)
+        run = WorkbotRun.objects.get(workbot=bot)
+        self.assertEqual(calls["n"], 3, run.summary)
+        self.assertIn("web_search", calls["names"])
+        searched.assert_called_once()
+        self.assertEqual(searched.call_args.args[0], "2026년 중소기업 정부지원사업")
+        self.assertEqual(run.status, WorkbotRun.Status.SUCCESS, run.summary)
+        record = Record.objects.get(title="2026년 11월 정부지원사업")
+        body = " ".join(Block.objects.filter(record=record).values_list("plain_text", flat=True))
+        self.assertIn(source, body)
+
     def test_due_agent_bot_writes_page_with_body_and_notifies(self):
         bot = self._bot(self._agent_spec())
         with patch("assistant.workbot_agent.llm.complete", self._fake_llm("주간 보고 11월 2주")):

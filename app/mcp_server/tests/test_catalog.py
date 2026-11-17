@@ -162,6 +162,22 @@ class CatalogFilterTests(SimpleTestCase):
         self.assertFalse(safety["destructive"])
         self.assertIn("저장소에는 쓰지 않습니다", safety["justifications"]["read_only_justification"])
 
+    def test_web_search_is_public_read_of_the_open_web(self):
+        self.assertIn(("POST", "/api/v1/search"), self.endpoints)
+        self.assertFalse(any(path.startswith("/api/v1/agent") for _method, path in self.endpoints))
+        spec = next(item for item in self.specs if item.path == "/api/v1/search")
+        self.assertEqual(spec.method, "POST")
+        self.assertEqual(spec.name, "post_api_v1_search")
+        self.assertIn("body", spec.input_schema["properties"])
+        self.assertIn("query", spec.input_schema["properties"]["body"]["properties"])
+        self.assertIn("results", spec.description)
+        safety = tool_safety(spec.method, spec.path)
+        self.assertTrue(safety["read_only"])
+        self.assertTrue(safety["open_world"])
+        self.assertFalse(safety["destructive"])
+        self.assertIn("워크스페이스에는 쓰지 않습니다", safety["justifications"]["read_only_justification"])
+        self.assertIn("공개 웹을 조회합니다", safety["justifications"]["open_world_justification"])
+
     def test_tool_names_are_unique(self):
         names = [spec.name for spec in self.specs]
         self.assertEqual(len(names), len(set(names)))

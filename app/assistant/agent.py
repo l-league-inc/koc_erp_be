@@ -9,6 +9,8 @@ from django.utils import timezone
 from ninja.errors import HttpError
 
 from assistant import llm, skillbook
+from assistant.web_search import TOOL as _WEB_SEARCH_TOOL
+from assistant.web_search import search_web
 from assistant.models import AgentMessage, AgentSession, ProposedAction
 from estimate.calculate import calculate
 from estimate.compose import draft_from_payload
@@ -299,6 +301,7 @@ _TOOLS = [
             },
         },
     },
+    _WEB_SEARCH_TOOL,
 ]
 
 
@@ -482,6 +485,8 @@ def _system_prompt(session: AgentSession, user) -> str:
         "아래는 스킬 이름과 설명입니다. 본문은 포함되어 있지 않습니다. "
         "사용자 문장이 설명과 맞으면 view_skill로 전문을 읽고 그 절차를 따릅니다. "
         "레코드나 스킬을 만들거나 고칠 때는 propose 도구만 사용하고, 저장이 끝났다고 말하지 않습니다. "
+        "회사 밖 사실(정부지원사업, 공고, 뉴스, 법령)은 web_search로 확인하고 출처 URL을 함께 안내합니다. "
+        "검색하지 않은 내용을 지어내지 않습니다. "
         "회사 문서는 search_documents로 찾고 get_document로 본문을 읽습니다. "
         "개인 문서는 이 사용자 것만 나옵니다. "
         "메일은 list_mails와 get_mail로 읽고, 보낼 때는 propose_send_mail만 씁니다. "
@@ -576,6 +581,14 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
         )
         created.append(action.id)
         return serialize_action(action)
+    if name == "web_search":
+        return search_web(
+            str(arguments.get("query") or ""),
+            max_results=arguments.get("max_results"),
+            time_range=arguments.get("time_range"),
+            include_domains=arguments.get("include_domains"),
+            topic=arguments.get("topic"),
+        )
     if name == "search_documents":
         return search_files(user, session.workspace_id, str(arguments.get("q") or ""))
     if name == "get_document":

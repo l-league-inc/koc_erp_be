@@ -141,6 +141,7 @@ REDIS_DB = 0
 OPENAI_API_KEY = get_secret("OPENAI_API_KEY")
 OPENAI_MODEL = "gpt-4o-mini"
 ANTHROPIC_API_KEY = secrets.get("ANTHROPIC_API_KEY", "")
+TAVILY_API_KEY = secrets.get("TAVILY_API_KEY", "")
 
 # Daum 메일 자격증명 암호화 (없으면 SECRET_KEY 유도)
 MAIL_CREDENTIALS_KEY = secrets.get("MAIL_CREDENTIALS_KEY", "")

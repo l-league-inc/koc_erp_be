@@ -11,6 +11,8 @@ from ninja.errors import HttpError
 from assistant import llm
 from assistant.agent import _TOOLS as _AGENT_TOOLS
 from assistant.models import Workbot
+from assistant.web_search import TOOL as _WEB_SEARCH_TOOL
+from assistant.web_search import search_web
 from document.utils import get_file_detail, search_files
 from workspace.models import RecordActivity
 from workspace.utils import (
@@ -79,6 +81,7 @@ _WRITE_TOOLS = [
             },
         },
     },
+    _WEB_SEARCH_TOOL,
 ]
 TOOLS = [
     tool for tool in _AGENT_TOOLS if tool["function"]["name"] in _READ_TOOLS
@@ -144,6 +147,11 @@ def _system_prompt(bot: Workbot, owner, spec: dict[str, Any]) -> str:
         f"type은 {_BLOCK_TYPES} 중 하나입니다.\n"
         "- 같은 일을 이미 했는지(같은 제목·기간의 레코드)를 query_records로 확인하고 있으면 새로 만들지 않습니다.\n"
         "- 조회 결과가 없으면 없다고 답하고 불필요한 레코드를 만들지 않습니다.\n"
+        "- 회사 밖 사실(정부지원사업, 공고, 뉴스, 법령, 시세)은 web_search로만 확인합니다. "
+        "검색하지 않은 내용을 지어내지 않습니다.\n"
+        "- 검색어는 400자 이하로 짧게 쓰고, 조건이 많으면 여러 번 나눕니다.\n"
+        "- 보고서 본문에는 찾은 항목의 제목, 요지, 출처 URL을 넣습니다. "
+        "검색 결과가 없으면 없다고 적고 공고를 만들지 않습니다.\n"
         f"{confirm}"
     )
 
@@ -254,6 +262,14 @@ def _dispatch(
         return search_files(owner, bot.workspace_id, str(arguments.get("q") or ""))
     if name == "get_document":
         return get_file_detail(owner, bot.workspace_id, int(arguments["file_id"]))
+    if name == "web_search":
+        return search_web(
+            str(arguments.get("query") or ""),
+            max_results=arguments.get("max_results"),
+            time_range=arguments.get("time_range"),
+            include_domains=arguments.get("include_domains"),
+            topic=arguments.get("topic"),
+        )
     if name == "create_record":
         return _create(bot, owner, arguments, defer=defer, pending=pending, record_ids=record_ids)
     if name == "update_record":

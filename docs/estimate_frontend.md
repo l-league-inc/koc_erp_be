@@ -13,7 +13,7 @@ audience: frontend
 
 1. 사용자가 자연어로 견적서를 요청하면 `POST /api/v1/estimate/documents/from-instruction/json`으로 보냅니다. 서버가 행만 판단하고, 말하지 않은 단가는 만들지 않습니다.
 2. 응답의 `draft`를 편집 폼에 넣고 `docx_base64`를 미리보기로 엽니다. 고친 값은 같은 `draft` 모양으로 `POST /api/v1/estimate/documents/json`에 다시 보내 미리보기를 갱신합니다.
-3. PDF 다운로드는 그 `draft`를 `POST /api/v1/estimate/documents/pdf`로 보냅니다. 화면이 JSON이 필요하면 `POST /documents/pdf/json`의 `pdf_base64`를 씁니다. 서버에 LibreOffice가 있으면 미리보기 docx를 그대로 PDF로 바꿉니다. 없으면 같은 거래처, 행, 공급가액, 부가세, 합계를 담은 PDF를 만듭니다.
+3. PDF 다운로드는 그 `draft`를 `POST /api/v1/estimate/documents/pdf`로 보냅니다. 화면이 JSON이 필요하면 `POST /documents/pdf/json`의 `pdf_base64`를 씁니다. PDF는 미리보기 docx를 그대로 변환한 파일이며 회사 직인 이미지가 유지됩니다.
 4. 메일 보내기는 선택입니다. 사용자가 받는 사람을 확인한 뒤에만 `POST /api/v1/estimate/documents/send`에 `draft`와 `to`를 보냅니다. PDF가 첨부됩니다. Daum 계정이 없으면 메일의 계정 오류를 보여 줍니다.
 5. 400이면 `detail`을 그대로 보여 주고 파일을 저장하지 않습니다. 견적 레코드나 드라이브 업로드는 이 API가 하지 않습니다.
 

@@ -12,7 +12,9 @@ RUN apt-get update && \
         curl \
         ffmpeg \
         build-essential \
-        libpq-dev && \
+        libpq-dev \
+        libreoffice-writer \
+        fonts-noto-cjk && \
     rm -rf /var/lib/apt/lists/*
 
 # Poetry 설치

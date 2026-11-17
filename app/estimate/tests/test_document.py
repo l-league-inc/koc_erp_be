@@ -1,9 +1,18 @@
 import base64
+import os
+import shutil
+import stat
+import sys
+import tempfile
+import zipfile
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
 from docx import Document
+from PIL import Image
+from pypdf import PdfReader
 
 from estimate.calculate import calculate
 from estimate.errors import EstimateError
@@ -23,6 +32,22 @@ from estimate.validate import parse_document, verify_document
 
 
 class DocumentTests(SimpleTestCase):
+    def setUp(self):
+        self._converter = None
+        if shutil.which("soffice") or shutil.which("libreoffice"):
+            return
+        self._converter = tempfile.TemporaryDirectory()
+        binary = Path(self._converter.name) / "soffice"
+        binary.write_text(_SEAL_CONVERTER, encoding="utf-8")
+        binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
+        self._old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = f"{self._converter.name}{os.pathsep}{self._old_path}"
+
+    def tearDown(self):
+        if self._converter is not None:
+            os.environ["PATH"] = self._old_path
+            self._converter.cleanup()
+
     def test_example_file_passes(self):
         parsed = verify_document(EXAMPLE_PATH)
         self.assertEqual(parsed.client_line, "LG유플러스 수원운영팀")
@@ -113,14 +138,17 @@ class DocumentTests(SimpleTestCase):
         self.assertEqual(payload["draft"]["client"], "LG유플러스")
         self.assertEqual(len(payload["draft"]["devices"]), 6)
 
-    def test_pdf_is_downloadable(self):
+    def test_pdf_keeps_the_seal_from_the_docx(self):
+        docx = build_document(example_draft())
         content = build_pdf(example_draft())
         self.assertTrue(content.startswith(b"%PDF"))
+        self.assertTrue(_pdf_contains_seal(content, docx))
         payload = pdf_payload(example_draft())
         self.assertEqual(payload["filename"], "견적서_LG유플러스_2026-11-10.pdf")
         self.assertEqual(payload["total"], 677600)
         self.assertEqual(payload["draft"]["contact"], "김현전")
-        self.assertTrue(base64.b64decode(payload["pdf_base64"]).startswith(b"%PDF"))
+        pdf = base64.b64decode(payload["pdf_base64"])
+        self.assertTrue(_pdf_contains_seal(pdf, docx))
 
     def test_send_attaches_the_pdf(self):
         with patch("mail.service.send_message") as send:
@@ -137,7 +165,7 @@ class DocumentTests(SimpleTestCase):
             )
         filename, content, mime = send.call_args.kwargs["attachments"][0]
         self.assertEqual(filename, "견적서_LG유플러스_2026-11-10.pdf")
-        self.assertTrue(content.startswith(b"%PDF"))
+        self.assertTrue(_pdf_contains_seal(content, build_document(example_draft())))
         self.assertEqual(mime, "application/pdf")
         self.assertEqual(result["filename"], filename)
         self.assertEqual(send.call_args.kwargs["to"], ["buyer@example.com"])
@@ -149,6 +177,41 @@ class DocumentTests(SimpleTestCase):
             with self.assertRaisesMessage(EstimateError, "장비는 6대까지입니다."):
                 build_document(draft)
             render.assert_not_called()
+
+
+_SEAL_CONVERTER = f"""#!{sys.executable}
+import sys
+import zipfile
+from io import BytesIO
+from pathlib import Path
+
+from PIL import Image
+
+args = sys.argv[1:]
+outdir = None
+docx = None
+for index, arg in enumerate(args):
+    if arg == "--outdir":
+        outdir = Path(args[index + 1])
+    elif arg.endswith(".docx"):
+        docx = Path(arg)
+if outdir is None or docx is None:
+    sys.exit(2)
+with zipfile.ZipFile(docx) as archive:
+    seal = archive.read("word/media/image1.png")
+Image.open(BytesIO(seal)).convert("RGB").save(outdir / "estimate.pdf", "PDF")
+"""
+
+
+def _pdf_contains_seal(pdf: bytes, docx: bytes) -> bool:
+    with zipfile.ZipFile(BytesIO(docx)) as archive:
+        seal = Image.open(BytesIO(archive.read("word/media/image1.png")))
+    width, height = seal.size
+    for page in PdfReader(BytesIO(pdf)).pages:
+        for image in page.images:
+            if image.image.size == (width, height):
+                return True
+    return False
 
 
 def _item_rows(source) -> list[tuple[str, ...]]:

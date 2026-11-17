@@ -37,12 +37,12 @@ def document_payload_from_instruction(user, instruction: str, model: str = "") -
 
 def build_pdf(draft: EstimateDraft) -> bytes:
     content, calculated = _verified(draft)
-    return render_pdf(content, calculated)
+    return render_pdf(content)
 
 
 def pdf_payload(draft: EstimateDraft) -> dict:
     content, calculated = _verified(draft)
-    pdf = render_pdf(content, calculated)
+    pdf = render_pdf(content)
     return {
         "filename": document_name(calculated.client, calculated.issued_on, "pdf"),
         "content_type": PDF_MIME,
@@ -56,7 +56,7 @@ def pdf_payload(draft: EstimateDraft) -> dict:
 
 def send_estimate(user, payload: EstimateSendSchema) -> dict:
     content, calculated = _verified(payload.draft)
-    pdf = render_pdf(content, calculated)
+    pdf = render_pdf(content)
     filename = document_name(calculated.client, calculated.issued_on, "pdf")
     subject = payload.subject.strip() or f"견적서 {calculated.client} {calculated.issued_on.isoformat()}"
     body = payload.body.strip() or (

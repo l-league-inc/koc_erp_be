@@ -6,7 +6,7 @@ ENV POETRY_VERSION=1.8.2
 RUN echo "koc erp backend railway django container. 2026.10.29 13:30 release"
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get install -y --no-install-recommends ffmpeg libreoffice-writer fonts-noto-cjk && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /home/koc_erp_be/
@@ -31,4 +31,4 @@ EXPOSE 8000
 
 WORKDIR /home/koc_erp_be/app/
 
-CMD ["bash", "-c", "python manage.py collectstatic --noinput --settings=config.settings.railway && python manage.py migrate --settings=config.settings.railway && gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --workers 4 --env DJANGO_SETTINGS_MODULE=config.settings.railway --bind 0.0.0.0:8000 --timeout 60"]
+CMD ["bash", "-c", "python manage.py collectstatic --noinput --settings=config.settings.railway && python manage.py migrate --settings=config.settings.railway && gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --workers 4 --env DJANGO_SETTINGS_MODULE=config.settings.railway --bind 0.0.0.0:8000 --timeout 120"]

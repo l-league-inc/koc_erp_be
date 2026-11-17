@@ -177,14 +177,19 @@ async def create_upload_api(request, workspace_id: int, payload: UploadRequestSc
     summary="[C] 문서 검색",
     description=(
         "공유 문서와 내 개인 문서만 검색합니다. "
-        "결과는 파일 id, 이름, 폴더 경로, 요약, 점수입니다. "
-        "본문은 문서 상세 조회로 읽습니다."
+        "kind는 image, audio, video 중 하나이고 없으면 전체입니다. "
+        "결과는 파일 id, 이름, 폴더 경로, content_type, space_kind, media_kind, 태그, 색인 상태, 요약, 점수입니다. "
+        "공유 문서함 이미지는 장면 설명, 오디오는 앞 180초 전사, 영상은 장면 설명이 상세의 extracted_text에 있습니다. "
+        "영상 요약은 첫 장면만입니다. "
+        "개인 문서함 미디어는 색인하지 않아 본문이 비어 있습니다. "
+        "본문은 문서 상세 조회로 읽습니다. "
+        "다운로드 URL은 300초짜리 첨부 주소라 내용을 대신 읽지 못합니다."
     ),
     response=list[SearchHitSchema],
     auth=jwt_auth,
 )
-async def search_file_api(request, workspace_id: int, q: str):
-    return await sync_to_async(search_files)(request.auth, workspace_id, q)
+async def search_file_api(request, workspace_id: int, q: str, kind: str = ""):
+    return await sync_to_async(search_files)(request.auth, workspace_id, q, kind)
 
 
 @router.get(

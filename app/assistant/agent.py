@@ -228,10 +228,20 @@ _TOOLS = [
         "type": "function",
         "function": {
             "name": "search_documents",
-            "description": "공유 문서함과 내 개인 문서함에서 파일을 검색합니다. 다른 사람의 개인 문서는 나오지 않습니다.",
+            "description": (
+                "공유 문서함과 내 개인 문서함에서 파일을 검색합니다. 다른 사람의 개인 문서는 나오지 않습니다. "
+                "kind는 image, audio, video 중 하나이고 없으면 전체입니다. "
+                "결과에는 content_type, space_kind, media_kind, tags_ko, index_status, description_ko가 있습니다. "
+                "공유 문서함 이미지는 장면 설명, 오디오는 앞 180초 전사, 영상은 장면 설명이 상세 extracted_text에 있습니다. "
+                "영상 요약은 첫 장면만입니다. 개인 문서함 미디어는 본문이 비어 있습니다. "
+                "다운로드 URL은 내용을 대신 읽지 못합니다."
+            ),
             "parameters": {
                 "type": "object",
-                "properties": {"q": {"type": "string"}},
+                "properties": {
+                    "q": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["image", "audio", "video"]},
+                },
                 "required": ["q"],
                 "additionalProperties": False,
             },
@@ -241,7 +251,12 @@ _TOOLS = [
         "type": "function",
         "function": {
             "name": "get_document",
-            "description": "문서 메타, 요약, 추출 본문을 조회합니다. 업로드나 삭제는 하지 않습니다.",
+            "description": (
+                "문서 메타, 요약, 추출 본문을 조회합니다. 업로드나 삭제는 하지 않습니다. "
+                "공유 문서함 이미지는 장면 설명, 오디오는 앞 180초 전사, 영상은 장면 설명이 extracted_text에 있습니다. "
+                "영상 요약은 첫 장면만입니다. 개인 문서함 미디어는 본문이 비어 있습니다. "
+                "다운로드 URL은 내용을 대신 읽지 못합니다."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {"file_id": {"type": "integer"}},
@@ -487,7 +502,8 @@ def _system_prompt(session: AgentSession, user) -> str:
         "레코드나 스킬을 만들거나 고칠 때는 propose 도구만 사용하고, 저장이 끝났다고 말하지 않습니다. "
         "회사 밖 사실(정부지원사업, 공고, 뉴스, 법령)은 web_search로 확인하고 출처 URL을 함께 안내합니다. "
         "검색하지 않은 내용을 지어내지 않습니다. "
-        "회사 문서는 search_documents로 찾고 get_document로 본문을 읽습니다. "
+        "회사 문서는 search_documents로 찾고 get_document의 extracted_text로 본문을 읽습니다. "
+        "이미지, 음성, 영상은 kind와 media_kind로 고릅니다. "
         "개인 문서는 이 사용자 것만 나옵니다. "
         "메일은 list_mails와 get_mail로 읽고, 보낼 때는 propose_send_mail만 씁니다. "
         "발송이 끝났다고 말하지 않습니다. "
@@ -590,7 +606,12 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
             topic=arguments.get("topic"),
         )
     if name == "search_documents":
-        return search_files(user, session.workspace_id, str(arguments.get("q") or ""))
+        return search_files(
+            user,
+            session.workspace_id,
+            str(arguments.get("q") or ""),
+            str(arguments.get("kind") or ""),
+        )
     if name == "get_document":
         return get_file_detail(user, session.workspace_id, int(arguments["file_id"]))
     if name == "list_mails":

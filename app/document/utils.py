@@ -7,7 +7,7 @@ from django.db.models import F, FloatField, Q, Value
 from django.db.models.functions import Coalesce
 from ninja.errors import HttpError
 
-from document.indexer import run_index
+from document.indexer import media_kind, media_kind_filter, run_index
 from document.models import (
     DocumentChange,
     DocumentDownload,
@@ -227,13 +227,19 @@ def delete_file(user, workspace_id: int, file_id: int) -> None:
     file.delete()
 
 
-def search_files(user, workspace_id: int, keyword: str) -> list[dict]:
+_MEDIA_KINDS = {"image", "audio", "video"}
+
+
+def search_files(user, workspace_id: int, keyword: str, kind: str = "") -> list[dict]:
     get_membership(user, workspace_id)
     query_text = (keyword or "").strip()
     if not query_text:
         raise HttpError(400, "검색어가 필요합니다.")
     if len(query_text) > 200:
         raise HttpError(400, "검색어는 200자를 넘길 수 없습니다.")
+    selected = (kind or "").strip().lower()
+    if selected and selected not in _MEDIA_KINDS:
+        raise HttpError(400, "kind는 image, audio, video 중 하나여야 합니다.")
     search_query = SearchQuery(query_text, config="simple")
     visible = Q(file__folder__space__kind=DocumentSpace.Kind.SHARED) | Q(
         file__folder__space__kind=DocumentSpace.Kind.PERSONAL,
@@ -243,6 +249,7 @@ def search_files(user, workspace_id: int, keyword: str) -> list[dict]:
         DocumentIndex.objects.select_related("file__folder__space")
         .filter(file__folder__space__workspace_id=workspace_id)
         .filter(visible)
+        .filter(media_kind_filter(selected) if selected else Q())
         .annotate(
             rank=Coalesce(
                 SearchRank(F("search_vector"), search_query),
@@ -271,6 +278,11 @@ def search_files(user, workspace_id: int, keyword: str) -> list[dict]:
                 "original_filename": index.file.original_filename,
                 "folder_id": index.file.folder_id,
                 "folder_path": paths[index.file.folder_id],
+                "content_type": index.file.content_type,
+                "space_kind": index.file.folder.space.kind,
+                "media_kind": media_kind(index.file.content_type, index.file.original_filename) or "",
+                "tags_ko": _tags(index.tags_ko),
+                "index_status": index.index_status,
                 "description_ko": index.description_ko,
                 "score": score,
             }

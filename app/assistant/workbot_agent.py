@@ -259,7 +259,12 @@ def _dispatch(
             payload["database_slug"] = slug
         return query_records(owner, payload)
     if name == "search_documents":
-        return search_files(owner, bot.workspace_id, str(arguments.get("q") or ""))
+        return search_files(
+            owner,
+            bot.workspace_id,
+            str(arguments.get("q") or ""),
+            str(arguments.get("kind") or ""),
+        )
     if name == "get_document":
         return get_file_detail(owner, bot.workspace_id, int(arguments["file_id"]))
     if name == "web_search":

@@ -88,6 +88,27 @@ def media_kind(content_type: str, filename: str) -> str | None:
     return None
 
 
+def _filename_ext_q(extensions: set[str]) -> Q:
+    query = Q()
+    for ext in extensions:
+        query |= Q(file__original_filename__iendswith=ext)
+    return query
+
+
+def media_kind_filter(kind: str) -> Q:
+    """DocumentIndex에서 이미지, 오디오, 영상만 남기는 조건입니다."""
+    image = Q(file__content_type__istartswith="image/") | _filename_ext_q(_IMAGE_EXTENSIONS)
+    audio = Q(file__content_type__istartswith="audio/") | _filename_ext_q(_AUDIO_EXTENSIONS)
+    video = Q(file__content_type__istartswith="video/") | _filename_ext_q(_VIDEO_EXTENSIONS)
+    if kind == "image":
+        return image
+    if kind == "audio":
+        return audio & ~image
+    if kind == "video":
+        return video & ~image & ~audio
+    raise ValueError(kind)
+
+
 def extract_text(path: str, content_type: str, filename: str) -> str | None:
     """지원하는 문서면 본문을 반환하고, 그 외 형식이면 None을 반환합니다."""
     ext = os.path.splitext(filename)[1].lower()

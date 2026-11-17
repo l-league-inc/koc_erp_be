@@ -64,6 +64,11 @@ class SearchHitSchema(Schema):
     original_filename: str
     folder_id: int
     folder_path: str
+    content_type: str
+    space_kind: str
+    media_kind: str
+    tags_ko: list[str]
+    index_status: str
     description_ko: str
     score: float
 

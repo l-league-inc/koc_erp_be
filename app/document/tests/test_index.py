@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from ninja.errors import HttpError
 
 from document.indexer import EncryptedPdfError, build_index, extract_text
 from document.models import DocumentIndex, DocumentSpace
@@ -312,3 +313,55 @@ class DocumentSearchIsolationTests(TestCase):
         self._add(self.owner, folder["id"], "contract.txt", "계약 연차 특약")
         nested = search_files(self.member, self.workspace.id, "특약")
         self.assertEqual(nested[0]["folder_path"], "계약")
+        self.assertEqual(nested[0]["media_kind"], "")
+        self.assertEqual(nested[0]["content_type"], "text/plain")
+        self.assertEqual(nested[0]["space_kind"], DocumentSpace.Kind.SHARED)
+
+    def test_search_kind_filters_media_hits(self):
+        from document.utils import search_files
+
+        spaces = ensure_spaces(self.member, self.workspace.id)
+        root_id = spaces[0]["root_folder_id"]
+
+        def add(filename: str, content_type: str) -> None:
+            with patch("document.utils.schedule_index"):
+                create_file(
+                    self.member,
+                    self.workspace.id,
+                    {
+                        "folder_id": root_id,
+                        "object_key": build_object_key(self.workspace.id, filename),
+                        "original_filename": filename,
+                        "content_type": content_type,
+                        "size": 20,
+                    },
+                )
+
+        add("현장사진.jpg", "image/jpeg")
+        add("현장녹음.mp3", "audio/mpeg")
+        add("현장메모.txt", "text/plain")
+        add("현장도면.png", "application/octet-stream")
+
+        images = search_files(self.member, self.workspace.id, "현장", "image")
+        self.assertEqual(
+            {item["original_filename"] for item in images},
+            {"현장사진.jpg", "현장도면.png"},
+        )
+        photo = next(item for item in images if item["original_filename"] == "현장사진.jpg")
+        self.assertEqual(photo["media_kind"], "image")
+        self.assertEqual(photo["content_type"], "image/jpeg")
+        self.assertEqual(photo["space_kind"], DocumentSpace.Kind.SHARED)
+        self.assertEqual(photo["index_status"], DocumentIndex.Status.PENDING)
+        self.assertEqual(photo["tags_ko"], [])
+
+        audio = search_files(self.member, self.workspace.id, "현장", "audio")
+        self.assertEqual([item["original_filename"] for item in audio], ["현장녹음.mp3"])
+        self.assertEqual(audio[0]["media_kind"], "audio")
+
+        everything = search_files(self.member, self.workspace.id, "현장")
+        self.assertEqual(len(everything), 4)
+        note = next(item for item in everything if item["original_filename"] == "현장메모.txt")
+        self.assertEqual(note["media_kind"], "")
+
+        with self.assertRaises(HttpError):
+            search_files(self.member, self.workspace.id, "현장", "document")

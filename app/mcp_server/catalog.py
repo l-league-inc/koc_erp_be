@@ -50,6 +50,19 @@ _PATH_SEGMENT = re.compile(r"[^A-Za-z0-9_]")
 WORKSPACE_RECORD_PATCH = ("PATCH", "/api/v1/workspace/record/{record_id}")
 WORKBOT_PATCH = ("PATCH", "/api/v1/workbot/{workbot_id}")
 WORKBOT_RUN = ("POST", "/api/v1/workbot/{workbot_id}/run")
+WORKSPACE_SEARCH = ("POST", "/api/v1/workspace/search")
+DOCUMENT_SEARCH = ("GET", "/api/v1/document/{workspace_id}/file/search")
+DOCUMENT_DETAIL = ("GET", "/api/v1/document/{workspace_id}/file/{file_id}")
+DOCUMENT_DOWNLOAD = ("POST", "/api/v1/document/{workspace_id}/file/{file_id}/download")
+DOCUMENT_MEDIA_READS = frozenset({DOCUMENT_SEARCH, DOCUMENT_DETAIL})
+_MEDIA_READ_NOTE = (
+    "공유 문서함 이미지는 장면 설명, 오디오는 앞 180초 전사, 영상은 장면 설명이 extracted_text에 있습니다. "
+    "영상 요약(description_ko)은 첫 장면만입니다. "
+    "개인 문서함 미디어는 색인하지 않아 본문이 비어 있습니다. "
+    "media_kind는 image, audio, video이고 그 외는 빈 문자열입니다. "
+    "kind 쿼리로 그 종류만 고를 수 있습니다. "
+    "다운로드 URL은 300초짜리 첨부 주소라 내용을 대신 읽지 못합니다."
+)
 PUBLIC_ENDPOINTS = frozenset(
     {
         ("GET", "/api/v1/auth/me"),
@@ -63,6 +76,9 @@ PUBLIC_ENDPOINTS = frozenset(
         ("GET", "/api/v1/workspace/{workspace_id}/member"),
         ("GET", "/api/v1/workspace/record/{record_id}"),
         ("POST", "/api/v1/workspace/query"),
+        ("POST", "/api/v1/workspace/search"),
+        ("GET", "/api/v1/workspace/{workspace_id}/page"),
+        ("GET", "/api/v1/workspace/page/{page_id}"),
         ("POST", "/api/v1/workspace/database/{database_id}/record"),
         WORKSPACE_RECORD_PATCH,
         ("GET", "/api/v1/workbot"),
@@ -249,6 +265,8 @@ def is_exposed(method: str, path: str, operation: Any) -> bool:
         return False
     if not is_customer_auth(operation):
         return False
+    if (method, path) == WORKSPACE_SEARCH:
+        return True
     return any(hint in summary for hint in CREATE_HINTS)
 
 
@@ -347,9 +365,10 @@ def tool_safety(method: str, path: str) -> dict[str, Any]:
     key = (method, path)
     view_count = key in VIEW_COUNT_GETS
     search = key in SEARCH_POSTS
+    workspace_search = key == WORKSPACE_SEARCH
     open_world = key in OPEN_WORLD_POSTS or search
     destructive = key in OPEN_WORLD_POSTS or key in DESTRUCTIVE_WRITES
-    read_only = (method == "GET" and not view_count) or search
+    read_only = (method == "GET" and not view_count) or search or workspace_search
     if search:
         justifications = {
             "read_only_justification": "웹을 검색해 결과만 돌려주며 워크스페이스에는 쓰지 않습니다.",
@@ -379,6 +398,12 @@ def tool_safety(method: str, path: str) -> dict[str, Any]:
             "read_only_justification": "견적서 파일을 만들어 반환하며 견적 레코드나 저장소에는 쓰지 않습니다.",
             "open_world_justification": "KOC ERP API만 호출하고 공개 인터넷에 글을 올리지 않습니다.",
             "destructive_justification": "기존 데이터를 지우거나 덮어쓰지 않고 결제하지 않습니다.",
+        }
+    elif key == DOCUMENT_DOWNLOAD:
+        justifications = {
+            "read_only_justification": "다운로드 이력을 남기고 300초 뒤 만료되는 첨부 URL을 돌려줍니다. 파일 내용은 바꾸지 않습니다.",
+            "open_world_justification": "KOC ERP API만 호출하고 공개 인터넷에 글을 올리지 않습니다.",
+            "destructive_justification": "파일을 지우거나 덮어쓰지 않습니다.",
         }
     else:
         justifications = {
@@ -425,13 +450,27 @@ def _description(method: str, path: str, summary: str, detail: str) -> str:
                 "장비는 6대까지이고 한 대는 부품 한 줄과 작업시간 한 줄입니다. "
                 "말하지 않은 단가는 만들지 않습니다. 견적 레코드는 저장하지 않습니다."
             )
-    if (method, path) in SEARCH_POSTS:
+    if (method, path) == WORKSPACE_SEARCH:
+        lines.append(
+            "레코드와 문서 페이지를 제목, 속성 텍스트, 블록 본문으로 찾습니다. "
+            "응답 data의 kind는 record 또는 page입니다. 워크스페이스에 저장하지 않습니다. "
+            "실패해도 자동으로 다시 호출하지 않습니다."
+        )
+    elif (method, path) == DOCUMENT_DOWNLOAD:
+        lines.append(
+            "다운로드 이력을 남기고 300초 뒤 만료되는 첨부 URL을 돌려줍니다. "
+            "이 URL로 이미지, 음성, 영상 내용을 읽지 못합니다. 본문은 문서 상세의 extracted_text입니다. "
+            "실패해도 자동으로 다시 호출하지 않습니다."
+        )
+    elif (method, path) in SEARCH_POSTS:
         lines.append(
             "응답 results는 title, url, content, score입니다. 워크스페이스에 저장하지 않습니다. "
             "검색어는 400자 이하입니다. 실패해도 자동으로 다시 호출하지 않습니다."
         )
     elif method == "POST":
         lines.append("이 호출은 데이터를 만들 수 있습니다. 실패해도 자동으로 다시 호출하지 않습니다.")
+    if (method, path) in DOCUMENT_MEDIA_READS:
+        lines.append(_MEDIA_READ_NOTE)
     if method == "PATCH":
         lines.append("이 호출은 레코드 값을 수정합니다. 레코드를 지우지는 않습니다.")
     lines.append(tool_safety(method, path)["justifications"]["read_only_justification"])

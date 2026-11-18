@@ -6,6 +6,23 @@ namespace KocDrive.Core.Update;
 
 public sealed record AppRelease(string Version, Uri Url, string Sha256, string Notes);
 
+public static class ReleasePlan
+{
+    public static bool ShouldInstall(string currentVersion, string? installedSha, string? runningSha, AppRelease release)
+    {
+        if (SameFile(installedSha, release.Sha256) || SameFile(runningSha, release.Sha256))
+        {
+            return false;
+        }
+
+        return ReleaseVersion.IsNewer(currentVersion, release.Version);
+    }
+
+    private static bool SameFile(string? actual, string expected) =>
+        !string.IsNullOrWhiteSpace(actual)
+        && string.Equals(actual.Trim(), expected.Trim(), StringComparison.OrdinalIgnoreCase);
+}
+
 public static class ReleaseVersion
 {
     public static bool IsValid(string value) => TryParts(value, out _);

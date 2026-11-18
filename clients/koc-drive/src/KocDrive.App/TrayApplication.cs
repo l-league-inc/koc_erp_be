@@ -778,15 +778,21 @@ internal sealed class TrayApplication : ApplicationContext
                 return;
             }
 
-            if (release is null || !ReleaseVersion.IsNewer(AppVersion.Current, release.Version))
+            if (release is null)
             {
-                _offeredVersion = null;
-                RefreshMenu();
-                if (interactive)
-                {
-                    Notify("최신 버전입니다.");
-                }
+                NoteCurrent(interactive);
+                return;
+            }
 
+            var runningSha = await Task.Run(() => AppUpdate.FileSha256(Environment.ProcessPath ?? AppInstall.ExePath));
+            if (!string.IsNullOrEmpty(runningSha) && string.Equals(runningSha, release.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                AppInstall.RememberInstalledSha(runningSha);
+            }
+
+            if (!ReleasePlan.ShouldInstall(AppVersion.Current, AppInstall.ReadInstalledSha(), runningSha, release))
+            {
+                NoteCurrent(interactive);
                 return;
             }
 
@@ -838,6 +844,16 @@ internal sealed class TrayApplication : ApplicationContext
         finally
         {
             Interlocked.Exchange(ref _checkingUpdate, 0);
+        }
+    }
+
+    private void NoteCurrent(bool interactive)
+    {
+        _offeredVersion = null;
+        RefreshMenu();
+        if (interactive)
+        {
+            Notify("최신 버전입니다.");
         }
     }
 

@@ -18,12 +18,50 @@ export DOTNET_ROOT="$(dirname "$dotnet_bin")"
 export PATH="${DOTNET_ROOT}:${PATH}"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 
+csproj="${root}/src/KocDrive.App/KocDrive.App.csproj"
+if [[ -n "${VERSION:-}" ]]; then
+  version="$VERSION"
+else
+  version="$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' "$csproj" | head -n 1)"
+fi
+if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]]; then
+  echo "버전은 1.2.0 형식이어야 합니다. 예: make drive VERSION=1.2.0" >&2
+  exit 1
+fi
+IFS='.' read -r major minor patch revision <<<"$version"
+file_version="${major}.${minor}.${patch:-0}.${revision:-0}"
+if [[ -n "${VERSION:-}" ]]; then
+  python3 - "$csproj" "$version" "$file_version" << 'PY'
+import pathlib, re, sys
+path, version, file_version = sys.argv[1:]
+file = pathlib.Path(path)
+text = file.read_text()
+replacements = {
+    "Version": version,
+    "AssemblyVersion": file_version,
+    "FileVersion": file_version,
+    "InformationalVersion": version,
+}
+for tag, value in replacements.items():
+    pattern = rf"<{tag}>[^<]*</{tag}>"
+    updated, count = re.subn(pattern, f"<{tag}>{value}</{tag}>", text, count=1)
+    if count != 1:
+        raise SystemExit(f"{tag} 태그를 찾지 못했습니다.")
+    text = updated
+file.write_text(text)
+PY
+fi
+
 out="${root}/dist/win-x64"
 rm -rf "$out"
-"$dotnet_bin" publish "${root}/src/KocDrive.App/KocDrive.App.csproj" \
+"$dotnet_bin" publish "$csproj" \
   -c Release \
   -r win-x64 \
   --self-contained true \
+  -p:Version="$version" \
+  -p:AssemblyVersion="$file_version" \
+  -p:FileVersion="$file_version" \
+  -p:InformationalVersion="$version" \
   -p:PublishSingleFile=true \
   -p:IncludeNativeLibrariesForSelfExtract=true \
   -p:EnableCompressionInSingleFile=true \
@@ -59,5 +97,4 @@ with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
 print(archive)
 print(exe)
 PY
-version="$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' "${root}/src/KocDrive.App/KocDrive.App.csproj" | head -n 1)"
-echo "버전 ${version}. 관리자 화면 Drive 릴리스에 dist/win-x64/KOC ERP.exe 를 올리세요. zip은 올리지 않습니다."
+echo "버전 ${version}. 관리자 화면 Drive 릴리스에도 같은 번호를 적으세요. 번호를 바꾸려면 make drive VERSION=1.2.0 입니다."

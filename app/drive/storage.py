@@ -23,21 +23,37 @@ def release_object_key(version: str) -> str:
     return f"koc/drive/{env}/{version}/KOC-ERP.exe"
 
 
-def presign_release(object_key: str) -> str:
+def presign_release(object_key: str, filename: str = "") -> str:
     try:
         bucket = _bucket()
     except ValueError as exc:
         raise HttpError(503, str(exc)) from None
+    params = {"Bucket": bucket, "Key": object_key}
+    if filename:
+        from urllib.parse import quote
+
+        safe = filename.replace('"', "").replace("\r", "").replace("\n", "")
+        params["ResponseContentDisposition"] = f"attachment; filename*=UTF-8''{quote(safe)}"
     try:
         return get_s3_client().generate_presigned_url(
             "get_object",
-            Params={"Bucket": bucket, "Key": object_key},
+            Params=params,
             ExpiresIn=PRESIGN_EXPIRES,
         )
     except HttpError:
         raise
     except Exception:
         raise HttpError(503, "업데이트 주소를 만들지 못했습니다.") from None
+
+
+def delete_release_object(object_key: str) -> None:
+    bucket = _bucket()
+    try:
+        get_s3_client().delete_object(Bucket=bucket, Key=object_key)
+    except ValueError:
+        raise
+    except Exception:
+        raise ValueError("설치 파일을 지우지 못했습니다.") from None
 
 
 def upload_release(object_key: str, package) -> None:

@@ -1,5 +1,11 @@
 from drive.models import DriveRelease
-from drive.storage import clean_version, hash_package, release_object_key, upload_release
+from drive.storage import (
+    clean_version,
+    delete_release_object,
+    hash_package,
+    release_object_key,
+    upload_release,
+)
 
 
 def publish_release(*, version: str, notes: str, package, make_current: bool) -> DriveRelease:
@@ -22,3 +28,15 @@ def publish_release(*, version: str, notes: str, package, make_current: bool) ->
         size=size,
         is_current=make_current,
     )
+
+
+def discard_releases(releases) -> None:
+    items = list(releases)
+    removed_ids = {item.pk for item in items}
+    for key in {item.object_key for item in items if item.object_key}:
+        still_used = DriveRelease.objects.filter(object_key=key).exclude(pk__in=removed_ids).exists()
+        if still_used:
+            continue
+        delete_release_object(key)
+    for item in items:
+        item.delete()

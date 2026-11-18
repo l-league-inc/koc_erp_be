@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 
 namespace KocDrive.App;
 
@@ -45,6 +46,12 @@ internal static class AppUpdate
                 try
                 {
                     File.Copy(source, target, overwrite: true);
+                    var installedSha = FileSha256(source);
+                    if (!string.IsNullOrEmpty(installedSha))
+                    {
+                        AppInstall.RememberInstalledSha(installedSha);
+                    }
+
                     Process.Start(new ProcessStartInfo
                     {
                         FileName = target,
@@ -65,6 +72,24 @@ internal static class AppUpdate
         }
 
         return true;
+    }
+
+    public static string? FileSha256(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     public static bool HandOff(string downloadedPath, string targetPath)

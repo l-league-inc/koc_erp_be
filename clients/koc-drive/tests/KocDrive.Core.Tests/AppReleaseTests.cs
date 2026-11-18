@@ -27,6 +27,18 @@ public class AppReleaseTests : IDisposable
     }
 
     [Fact]
+    public void DoesNotReinstallTheRunningFile()
+    {
+        var sha = new string('a', 64);
+        var release = new AppRelease("1.2.0", new Uri("https://files.example.com/app.exe"), sha, "");
+
+        Assert.False(ReleasePlan.ShouldInstall("1.1.0", sha, null, release));
+        Assert.False(ReleasePlan.ShouldInstall("1.1.0", null, sha, release));
+        Assert.True(ReleasePlan.ShouldInstall("1.1.0", new string('b', 64), new string('b', 64), release));
+        Assert.False(ReleasePlan.ShouldInstall("1.2.0", null, null, release));
+    }
+
+    [Fact]
     public void EmptyManifestMeansNoRelease()
     {
         var release = AppReleaseManifest.Parse("""{"version":"","url":"","sha256":"","notes":""}""");

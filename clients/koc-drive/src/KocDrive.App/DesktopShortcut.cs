@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace KocDrive.App;
 
 internal static class DesktopShortcut
@@ -28,7 +30,17 @@ internal static class DesktopShortcut
         shortcut.IconLocation = IconLocation();
         shortcut.Description = "KOC ERP";
         shortcut.Save();
+        try
+        {
+            SHChangeNotify(0x00002000, 0x0005 | 0x1000, linkPath, IntPtr.Zero);
+        }
+        catch (Exception)
+        {
+        }
     }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern void SHChangeNotify(uint eventId, uint flags, string item1, IntPtr item2);
 
     private static string IconLocation()
     {

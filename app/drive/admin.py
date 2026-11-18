@@ -1,8 +1,12 @@
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.http import Http404, HttpResponseRedirect
+from django.urls import path, reverse
+from django.utils.html import format_html
 
 from drive.models import DriveRelease
-from drive.services import publish_release
+from drive.services import discard_releases, publish_release
+from drive.storage import presign_release
 
 
 class DriveReleaseAdminForm(forms.ModelForm):
@@ -33,15 +37,36 @@ class DriveReleaseAdminForm(forms.ModelForm):
 @admin.register(DriveRelease)
 class DriveReleaseAdmin(admin.ModelAdmin):
     form = DriveReleaseAdminForm
-    list_display = ("version", "is_current", "size", "created_at")
+    list_display = ("version", "is_current", "size", "download_link", "created_at")
     list_filter = ("is_current",)
     search_fields = ("version", "notes", "sha256")
-    readonly_fields = ("sha256", "size", "object_key", "created_at", "updated_at")
+    readonly_fields = ("sha256", "size", "object_key", "download_link", "created_at", "updated_at")
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "<int:object_id>/download/",
+                self.admin_site.admin_view(self.download_view),
+                name="drive_driverelease_download",
+            ),
+        ]
+        return custom + urls
 
     def get_fields(self, request, obj=None):
         if obj is None:
             return ("version", "notes", "is_current", "package")
-        return ("version", "notes", "is_current", "sha256", "size", "object_key", "created_at", "updated_at")
+        return (
+            "version",
+            "notes",
+            "is_current",
+            "download_link",
+            "sha256",
+            "size",
+            "object_key",
+            "created_at",
+            "updated_at",
+        )
 
     def get_readonly_fields(self, request, obj=None):
         fields = list(super().get_readonly_fields(request, obj))
@@ -65,3 +90,27 @@ class DriveReleaseAdmin(admin.ModelAdmin):
             obj.size = stored.size
             return
         super().save_model(request, obj, form, change)
+
+    def delete_model(self, request, obj):
+        discard_releases([obj])
+
+    def delete_queryset(self, request, queryset):
+        discard_releases(queryset)
+
+    @admin.display(description="파일")
+    def download_link(self, obj):
+        if not getattr(obj, "pk", None) or not obj.object_key:
+            return "-"
+        url = reverse("admin:drive_driverelease_download", args=[obj.pk])
+        return format_html('<a class="button" href="{}">다운로드</a>', url)
+
+    def download_view(self, request, object_id):
+        release = self.get_object(request, object_id)
+        if release is None:
+            raise Http404
+        try:
+            url = presign_release(release.object_key, filename=f"KOC ERP {release.version}.exe")
+        except Exception:
+            messages.error(request, "설치 파일을 받지 못했습니다.")
+            return HttpResponseRedirect(reverse("admin:drive_driverelease_change", args=[release.pk]))
+        return HttpResponseRedirect(url)

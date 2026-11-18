@@ -21,6 +21,7 @@ public class DriveSettingsTests : IDisposable
         Assert.True(settings.LaunchAtStartup);
         Assert.Equal(DriveSettings.DefaultIntervalSeconds, settings.SyncIntervalSeconds);
         Assert.True(settings.ShowNotifications);
+        Assert.True(settings.AutoUpdate);
     }
 
     [Fact]
@@ -32,6 +33,7 @@ public class DriveSettingsTests : IDisposable
             LaunchAtStartup = false,
             SyncIntervalSeconds = 30,
             ShowNotifications = false,
+            AutoUpdate = false,
         };
         var path = FilePath("settings.json");
         settings.Save(path);
@@ -42,6 +44,7 @@ public class DriveSettingsTests : IDisposable
         Assert.False(loaded.LaunchAtStartup);
         Assert.Equal(30, loaded.SyncIntervalSeconds);
         Assert.False(loaded.ShowNotifications);
+        Assert.False(loaded.AutoUpdate);
     }
 
     [Fact]
@@ -55,6 +58,7 @@ public class DriveSettingsTests : IDisposable
         Assert.True(settings.LaunchAtStartup);
         Assert.Equal(DriveSettings.DefaultIntervalSeconds, settings.SyncIntervalSeconds);
         Assert.False(settings.ShowNotifications);
+        Assert.True(settings.AutoUpdate);
     }
 
     [Fact]

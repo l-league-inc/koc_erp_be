@@ -6,17 +6,10 @@ internal static class AppIcon
     {
         try
         {
-            var assembly = typeof(AppIcon).Assembly;
-            var resource = assembly.GetManifestResourceNames()
-                .FirstOrDefault(name => name.EndsWith("koc-drive.ico", StringComparison.OrdinalIgnoreCase));
-            if (resource is not null)
+            var icon = OpenEmbedded();
+            if (icon is not null)
             {
-                using var stream = assembly.GetManifestResourceStream(resource);
-                if (stream is not null)
-                {
-                    using var file = new Icon(stream);
-                    return new Icon(file, SystemInformation.SmallIconSize);
-                }
+                return icon;
             }
         }
         catch (Exception)
@@ -36,5 +29,27 @@ internal static class AppIcon
         }
 
         return SystemIcons.Application;
+    }
+
+    private static Icon? OpenEmbedded()
+    {
+        var assembly = typeof(AppIcon).Assembly;
+        var resource = assembly.GetManifestResourceNames()
+            .FirstOrDefault(name => name.EndsWith("koc-drive.ico", StringComparison.OrdinalIgnoreCase));
+        if (resource is null)
+        {
+            return null;
+        }
+
+        using var stream = assembly.GetManifestResourceStream(resource);
+        if (stream is null)
+        {
+            return null;
+        }
+
+        using var copy = new MemoryStream();
+        stream.CopyTo(copy);
+        copy.Position = 0;
+        return new Icon(copy);
     }
 }

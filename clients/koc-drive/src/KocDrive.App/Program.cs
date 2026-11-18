@@ -3,8 +3,13 @@ namespace KocDrive.App;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
+        if (AppUpdate.TryApplyLaunch(args))
+        {
+            return;
+        }
+
         try
         {
             AppInstall.InstallCopy();

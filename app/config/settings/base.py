@@ -91,6 +91,7 @@ LOCAL_APPS = [
     "document",
     "mail",
     "estimate",
+    "drive",
 ]
 
 INSTALLED_APPS = CHANNEL_APPS + DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

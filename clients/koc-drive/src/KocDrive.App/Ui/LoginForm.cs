@@ -9,11 +9,11 @@ internal sealed class LoginForm : KocDialog
     private readonly Label _error;
 
     public LoginForm(Func<string, string, Task> signIn)
-        : base("KOC ERP", 520)
+        : base("KOC ERP", 552)
     {
         _signIn = signIn;
         AddLogo();
-        AddHeading("관리자 로그인");
+        AddHeading("로그인");
         _email = AddField("이메일을 입력해주세요.");
         _password = AddField("비밀번호를 입력해 주세요.", password: true);
         _error = AddError();

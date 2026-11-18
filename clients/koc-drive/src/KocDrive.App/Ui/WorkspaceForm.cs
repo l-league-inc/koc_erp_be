@@ -6,7 +6,7 @@ internal sealed class WorkspaceForm : KocDialog
     private readonly Label _error;
 
     public WorkspaceForm(IReadOnlyList<(long Id, string Name)> workspaces)
-        : base("KOC ERP", 460)
+        : base("KOC ERP", 492)
     {
         AddLogo();
         AddHeading("워크스페이스");

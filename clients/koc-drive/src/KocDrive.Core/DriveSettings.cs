@@ -15,6 +15,8 @@ public sealed class DriveSettings
 
     public bool ShowNotifications { get; set; } = true;
 
+    public bool AutoUpdate { get; set; } = true;
+
     public int IntervalMilliseconds => SyncIntervalSeconds * 1000;
 
     public static DriveSettings Load(string path)
@@ -54,6 +56,11 @@ public sealed class DriveSettings
                 settings.ShowNotifications = notifications.GetBoolean();
             }
 
+            if (root.TryGetProperty("autoUpdate", out var autoUpdate) && autoUpdate.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            {
+                settings.AutoUpdate = autoUpdate.GetBoolean();
+            }
+
             settings.Normalize();
             return settings;
         }
@@ -78,6 +85,7 @@ public sealed class DriveSettings
             launchAtStartup = LaunchAtStartup,
             syncIntervalSeconds = SyncIntervalSeconds,
             showNotifications = ShowNotifications,
+            autoUpdate = AutoUpdate,
         };
         File.WriteAllText(path, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
     }

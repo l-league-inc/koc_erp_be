@@ -8,11 +8,12 @@ internal sealed class SettingsForm : KocDialog
     private readonly CheckBox _launch;
     private readonly KocField _interval;
     private readonly CheckBox _notifications;
+    private readonly CheckBox _autoUpdate;
     private readonly Label _error;
     private readonly Action _openFolder;
 
     public SettingsForm(DriveSettings current, string? account, string syncRoot, string? environmentUrl, Action openFolder)
-        : base("KOC ERP", 700)
+        : base("KOC ERP", 840)
     {
         _openFolder = openFolder;
         AddLogo();
@@ -33,6 +34,9 @@ internal sealed class SettingsForm : KocDialog
         Body.Controls.Add(Hint("최소 5초입니다."));
         _notifications = Check("상태 알림", current.ShowNotifications);
         Body.Controls.Add(_notifications);
+        _autoUpdate = Check("새 버전이 있으면 자동으로 설치", current.AutoUpdate);
+        Body.Controls.Add(_autoUpdate);
+        Body.Controls.Add(Info("앱 버전", AppVersion.Current));
         Body.Controls.Add(Info("계정", string.IsNullOrWhiteSpace(account) ? "로그인되지 않음" : account));
         Body.Controls.Add(Info("작업 폴더", syncRoot));
         var open = AddButton("작업 폴더 열기", primary: false);
@@ -70,6 +74,7 @@ internal sealed class SettingsForm : KocDialog
             LaunchAtStartup = _launch.Checked,
             SyncIntervalSeconds = seconds,
             ShowNotifications = _notifications.Checked,
+            AutoUpdate = _autoUpdate.Checked,
         };
         DialogResult = DialogResult.OK;
         Close();

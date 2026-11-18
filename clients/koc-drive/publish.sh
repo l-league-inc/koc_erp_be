@@ -57,4 +57,7 @@ archive = root / "dist" / "KocDrive-win-x64.zip"
 with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
     package.write(exe, exe.name)
 print(archive)
+print(exe)
 PY
+version="$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' "${root}/src/KocDrive.App/KocDrive.App.csproj" | head -n 1)"
+echo "버전 ${version}. 관리자 화면 Drive 릴리스에 dist/win-x64/KOC ERP.exe 를 올리세요. zip은 올리지 않습니다."

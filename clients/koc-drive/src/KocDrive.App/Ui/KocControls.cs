@@ -22,11 +22,7 @@ internal class KocDialog : Form
         ClientSize = new Size(DialogWidth, height);
         try
         {
-            var icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            if (icon is not null)
-            {
-                Icon = icon;
-            }
+            Icon = AppIcon.Load();
         }
         catch (Exception)
         {
@@ -57,42 +53,17 @@ internal class KocDialog : Form
         var row = new Panel
         {
             Width = ContentWidth,
-            Height = 40,
+            Height = 72,
             BackColor = KocTheme.Card,
             Margin = new Padding(0, 0, 0, 28),
         };
-        var mark = new RoundedPanel
+        row.Controls.Add(new PictureBox
         {
-            Width = 36,
-            Height = 36,
-            Radius = 10,
-            BackColor = KocTheme.Mark,
-            Location = new Point((ContentWidth - 148) / 2, 2),
-        };
-        mark.Controls.Add(new Label
-        {
-            Text = "A",
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = Color.White,
-            BackColor = KocTheme.Mark,
-            Font = KocTheme.MarkFont,
-        });
-        var word = new Label
-        {
-            Text = "KOC ERP",
-            AutoSize = true,
-            ForeColor = KocTheme.Title,
+            Image = BrandAssets.Logo(),
+            SizeMode = PictureBoxSizeMode.Zoom,
             BackColor = KocTheme.Card,
-            Font = KocTheme.TitleFont,
-            Location = new Point(mark.Right + 10, 6),
-        };
-        row.Controls.Add(mark);
-        row.Controls.Add(word);
-        var groupWidth = TextRenderer.MeasureText(word.Text, word.Font).Width + 10 + mark.Width;
-        var left = Math.Max(0, (ContentWidth - groupWidth) / 2);
-        mark.Left = left;
-        word.Left = mark.Right + 10;
+            Dock = DockStyle.Fill,
+        });
         Body.Controls.Add(row);
     }
 

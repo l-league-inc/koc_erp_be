@@ -20,6 +20,7 @@ from verification.api import router as verify_router
 from assistant.api import agent_router, search_router, workbot_router
 from document.api import router as document_router
 from estimate.api import router as estimate_router
+from drive.api import router as drive_router
 from mail.api import router as mail_router
 from workspace.api import router as workspace_router
 
@@ -90,6 +91,7 @@ base_api.add_router("api/v1/workbot", workbot_router)
 base_api.add_router("api/v1/document", document_router)
 base_api.add_router("api/v1/mail", mail_router)
 base_api.add_router("api/v1/estimate", estimate_router)
+base_api.add_router("api/v1/drive", drive_router)
 
 urlpatterns = [
     path(

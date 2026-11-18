@@ -15,7 +15,6 @@ internal static class KocTheme
     public static readonly Color ButtonHover = Color.FromArgb(0x2F, 0x2F, 0x2F);
     public static readonly Color ButtonDisabled = Color.FromArgb(0x9A, 0x9A, 0x9A);
     public static readonly Color Danger = Color.FromArgb(0xF0, 0x44, 0x52);
-    public static readonly Color Mark = Color.FromArgb(0x17, 0x17, 0x17);
     public static readonly Color MenuHover = Color.FromArgb(0xF2, 0xF4, 0xF6);
     public static readonly Color Status = Color.FromArgb(0x6B, 0x76, 0x84);
 
@@ -26,7 +25,6 @@ internal static class KocTheme
     public static readonly Font InputFont = Create(10.5f);
     public static readonly Font ButtonFont = Create(11.25f);
     public static readonly Font TitleFont = Create(16.5f, FontStyle.Bold);
-    public static readonly Font MarkFont = Create(12f, FontStyle.Bold);
     public static readonly Font Menu = Create(10f);
     public static readonly Font Error = Create(9.75f);
     public static readonly Font Hint = Create(9f);

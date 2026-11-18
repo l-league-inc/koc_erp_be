@@ -4,6 +4,7 @@ using KocDrive.CloudFiles;
 using KocDrive.Core;
 using KocDrive.Core.Api;
 using KocDrive.Core.Sync;
+using KocDrive.Core.Update;
 
 namespace KocDrive.App;
 
@@ -33,6 +34,10 @@ internal sealed class TrayApplication : ApplicationContext
     private readonly ToolStripMenuItem _loginItem;
     private readonly ToolStripMenuItem _logoutItem;
     private readonly ToolStripMenuItem _syncItem;
+    private readonly ToolStripMenuItem _updateItem;
+    private readonly System.Windows.Forms.Timer _updateTimer;
+    private string? _offeredVersion;
+    private int _checkingUpdate;
     private int _applying;
     private int _ticking;
     private int _acceptLocalChanges;
@@ -53,6 +58,7 @@ internal sealed class TrayApplication : ApplicationContext
         _logoutItem = MenuItem("로그아웃", (_, _) => Logout());
         var folderItem = MenuItem("작업 폴더 열기", (_, _) => OpenWorkFolder());
         _syncItem = MenuItem("지금 동기화", (_, _) => Defer(SyncNow));
+        _updateItem = MenuItem("업데이트 확인", (_, _) => Defer(() => _ = CheckForUpdateAsync(interactive: true)));
         var settingsItem = MenuItem("설정", (_, _) => Defer(OpenSettings));
         var exitItem = MenuItem("종료", (_, _) => ExitThread());
         var menu = new ContextMenuStrip
@@ -69,6 +75,7 @@ internal sealed class TrayApplication : ApplicationContext
             _logoutItem,
             folderItem,
             _syncItem,
+            _updateItem,
             settingsItem,
             exitItem,
         });
@@ -85,6 +92,9 @@ internal sealed class TrayApplication : ApplicationContext
         RevealTrayIcon();
         _timer = new System.Windows.Forms.Timer { Interval = _settings.IntervalMilliseconds };
         _timer.Tick += async (_, _) => await TickAsync();
+        _updateTimer = new System.Windows.Forms.Timer { Interval = 8000 };
+        _updateTimer.Tick += async (_, _) => await CheckForUpdateAsync(interactive: false);
+        _updateTimer.Start();
         try
         {
             DesktopShortcut.Ensure(_syncRoot);
@@ -102,6 +112,7 @@ internal sealed class TrayApplication : ApplicationContext
         if (disposing)
         {
             _timer.Dispose();
+            _updateTimer.Dispose();
             _revealTimer?.Dispose();
             _dialogs.Dispose();
             _watcher?.Dispose();
@@ -121,6 +132,9 @@ internal sealed class TrayApplication : ApplicationContext
         _loginItem.Visible = !loggedIn;
         _logoutItem.Visible = loggedIn;
         _syncItem.Visible = loggedIn;
+        _updateItem.Text = string.IsNullOrEmpty(_offeredVersion)
+            ? "업데이트 확인"
+            : $"업데이트 설치 ({_offeredVersion})";
     }
 
     private static ToolStripMenuItem MenuItem(string text, EventHandler? onClick = null, bool enabled = true)
@@ -729,6 +743,123 @@ internal sealed class TrayApplication : ApplicationContext
         }
 
         _icon.Text = message.Length <= 63 ? message : message[..63];
+    }
+
+    private async Task CheckForUpdateAsync(bool interactive)
+    {
+        if (Interlocked.Exchange(ref _checkingUpdate, 1) == 1)
+        {
+            return;
+        }
+
+        try
+        {
+            _updateTimer.Interval = 6 * 60 * 60 * 1000;
+            if (!interactive && BusyDialog())
+            {
+                _updateTimer.Interval = 120_000;
+                return;
+            }
+
+            using var client = new ReleaseClient(CurrentApiBase());
+            AppRelease? release;
+            try
+            {
+                release = await client.FetchAsync(CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                AppInstall.WriteStartupLog(exception);
+                if (interactive)
+                {
+                    Notify("업데이트를 확인하지 못했습니다.");
+                }
+
+                return;
+            }
+
+            if (release is null || !ReleaseVersion.IsNewer(AppVersion.Current, release.Version))
+            {
+                _offeredVersion = null;
+                RefreshMenu();
+                if (interactive)
+                {
+                    Notify("최신 버전입니다.");
+                }
+
+                return;
+            }
+
+            if (!_settings.AutoUpdate && !interactive)
+            {
+                if (_offeredVersion == release.Version)
+                {
+                    return;
+                }
+
+                _offeredVersion = release.Version;
+                RefreshMenu();
+                var notes = string.IsNullOrWhiteSpace(release.Notes) ? "" : Environment.NewLine + Environment.NewLine + TrimNotes(release.Notes);
+                var install = MessageBox.Show(
+                    $"{release.Version} 버전이 있습니다. 지금 설치할까요?{notes}",
+                    "KOC ERP",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Information);
+                if (install != DialogResult.Yes)
+                {
+                    return;
+                }
+            }
+
+            _offeredVersion = release.Version;
+            RefreshMenu();
+            if (_settings.AutoUpdate && !interactive)
+            {
+                Notify($"{release.Version}으로 업데이트한 뒤 다시 시작합니다.");
+            }
+
+            var destination = Path.Combine(AppInstall.DirectoryPath, "update", AppInstall.ExeName);
+            try
+            {
+                await Task.Run(() => client.DownloadAsync(release, destination, CancellationToken.None));
+            }
+            catch (Exception exception)
+            {
+                AppInstall.WriteStartupLog(exception);
+                Notify(string.IsNullOrWhiteSpace(exception.Message) ? "업데이트를 받지 못했습니다." : exception.Message);
+                return;
+            }
+
+            if (!AppUpdate.HandOff(destination, AppInstall.ExePath))
+            {
+                Notify("업데이트를 설치하지 못했습니다.");
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _checkingUpdate, 0);
+        }
+    }
+
+    private static bool BusyDialog()
+    {
+        foreach (Form form in Application.OpenForms)
+        {
+            if (form is DialogHost || !form.Visible)
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string TrimNotes(string notes)
+    {
+        var text = notes.Trim();
+        return text.Length <= 300 ? text : text[..300];
     }
 
     private void Report(string message) => Notify(message);

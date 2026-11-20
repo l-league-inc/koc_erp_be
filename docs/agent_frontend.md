@@ -20,7 +20,7 @@ audience: frontend
 5. `POST /api/v1/agent/session/{session_id}/message`에 사용자 문장을 보냅니다. 이번 문장만 다른 모델을 쓰려면 `model`을 함께 보냅니다. 비우면 저장된 선택을 씁니다.
 6. 응답 `proposed_actions`가 비어 있으면 안내 문장만 보여 줍니다.
 7. 초안이 있으면 내용을 보여주고, 확인 후 `POST /api/v1/agent/session/{session_id}/confirm`에 `action_ids`를 보냅니다.
-8. 확정 응답의 `records`로 만들어진 행을 엽니다. 스킬 초안이면 `skills`의 `name`으로 스킬 목록을 다시 불러옵니다. 메일 발송 초안이면 `mails`로 발송 결과를 보여 줍니다. 견적서 초안이면 `estimates`의 `draft`로 편집 폼을 열고 `docx_base64`를 미리보기로 둡니다. PDF와 메일은 [estimate_frontend.md](estimate_frontend.md)의 API로 이어 갑니다.
+8. 확정 응답의 `message`를 대화 끝에 붙입니다. 이 문장이 확정 사실이며, 다음 사용자 문장에서 서버가 초안 상태를 모델에 함께 넣습니다. `records`로 만들어진 행을 엽니다. 스킬 초안이면 `skills`의 `name`으로 스킬 목록을 다시 불러옵니다. 메일 발송 초안이면 `mails`로 발송 결과를 보여 줍니다. 견적서 초안이면 `estimates`의 `draft`로 편집 폼을 열고 `docx_base64`를 미리보기로 둡니다. PDF와 메일은 [estimate_frontend.md](estimate_frontend.md)의 API로 이어 갑니다.
 
 ## API
 
@@ -70,7 +70,7 @@ audience: frontend
 
 외부 검색은 `POST /api/v1/search`입니다. 본문은 `query`가 필수이고, 선택으로 `max_results`(1–8, 기본 5), `time_range`(`day`/`week`/`month`/`year`), `include_domains`(도메인 배열), `topic`(`general`/`news`)입니다. 응답은 `query`와 `results`이고, 항목은 `title`, `url`, `content`, `score`입니다. 워크스페이스에 저장하지 않습니다. 같은 API가 MCP 도구로도 열립니다. 업무 대화에서는 고정 스킬 `web_search`가 `web_search` 도구로 이 검색을 하고, 페이지가 필요하면 생성 초안을 만듭니다.
 
-대화 목록 항목은 `id`, `workspace_id`, `database_slug`, `preview`, `created_at`, `updated_at`입니다. 상세는 여기에 `messages`, `proposed_actions`가 있습니다. 메시지는 `id`, `role`(`user`/`assistant`), `content`, `created_at`입니다. 초안은 `id`, `kind`, `status`(`pending`/`confirmed`/`rejected`), `payload`, `result`입니다. 메시지 전송 응답은 `message`, `proposed_actions`입니다. 확정 응답은 `proposed_actions`, `records`, `skills`, `mails`, `estimates`입니다. `records` 항목은 `action_id`, `record_id`, `database_id`, `title`입니다. `database_id`로 해당 데이터베이스의 레코드 목록 캐시만 무효화할 수 있습니다. `skills` 항목은 `action_id`, `skill_id`, `name`입니다. `mails` 항목은 `action_id`, `sender`, `to`, `cc`, `bcc`, `subject`입니다. `estimates` 항목은 `action_id`, `filename`, `content_type`, `supply_amount`, `vat`, `total`, `draft`, `docx_base64`입니다. `draft`는 견적서 편집 폼에 다시 넣는 초안입니다. 해당 종류가 없으면 빈 배열입니다. 확정된 견적서의 같은 값은 초안 `result`에도 남습니다.
+대화 목록 항목은 `id`, `workspace_id`, `database_slug`, `preview`, `created_at`, `updated_at`입니다. 상세는 여기에 `messages`, `proposed_actions`가 있습니다. 메시지는 `id`, `role`(`user`/`assistant`), `content`, `created_at`입니다. 초안은 `id`, `kind`, `status`(`pending`/`confirmed`/`rejected`), `payload`, `result`입니다. 메시지 전송 응답은 `message`, `proposed_actions`입니다. 확정 응답은 `message`, `proposed_actions`, `records`, `skills`, `mails`, `estimates`입니다. `message`는 확정 사실을 적은 도우미 문장이고, 대화 기록과 목록 `preview`에 남습니다. `records` 항목은 `action_id`, `record_id`, `database_id`, `title`입니다. `database_id`로 해당 데이터베이스의 레코드 목록 캐시만 무효화할 수 있습니다. `skills` 항목은 `action_id`, `skill_id`, `name`입니다. `mails` 항목은 `action_id`, `sender`, `to`, `cc`, `bcc`, `subject`입니다. `estimates` 항목은 `action_id`, `filename`, `content_type`, `supply_amount`, `vat`, `total`, `draft`, `docx_base64`입니다. `draft`는 견적서 편집 폼에 다시 넣는 초안입니다. 해당 종류가 없으면 빈 배열입니다. 확정된 견적서의 같은 값은 초안 `result`에도 남습니다.
 
 스킬 목록 항목은 `id`, `workspace_id`, `name`, `description`, `body`, `source`(`bundled`/`user`), `enabled`, `created_at`, `updated_at`입니다. 고정 스킬은 `enabled`가 true이고 시각은 `null`입니다. 생성 본문은 `workspace_id`, `name`, `description`, `body`, `enabled`입니다.
 
@@ -84,7 +84,7 @@ audience: frontend
 - 같은 `session_id`로 이어서 보내고, 재진입 때는 상세 조회로 메시지를 복원한다.
 - 대화 삭제는 `DELETE /session/{session_id}`만 호출하고, 204이면 목록에서 뺀다.
 - `proposed_actions`가 `pending`일 때만 확정 버튼을 띄운다.
-- 확정에 성공하면 해당 영역의 표 조회를 다시 불러온다. 스킬 초안이면 스킬 목록을 다시 불러온다. 메일 발송 초안이면 `mails` 결과를 보여 준다. 견적서 초안이면 `estimates`의 `draft`와 `docx_base64`로 미리보기 편집을 연다. 확정 전에는 파일이 없다고 보여 준다. PDF 다운로드와 메일 보내기는 견적서 API를 사용자가 누를 때만 호출한다.
+- 확정에 성공하면 응답 `message`를 대화 끝에 붙이고, 해당 영역의 표 조회를 다시 불러온다. 스킬 초안이면 스킬 목록을 다시 불러온다. 메일 발송 초안이면 `mails` 결과를 보여 준다. 견적서 초안이면 `estimates`의 `draft`와 `docx_base64`로 미리보기 편집을 연다. 확정 전에는 파일이 없다고 보여 준다. PDF 다운로드와 메일 보내기는 견적서 API를 사용자가 누를 때만 호출한다.
 - 고정 스킬은 목록에만 보여주고 수정·삭제 버튼을 만들지 않는다. `id`가 `null`이다.
 
 ## 비범위

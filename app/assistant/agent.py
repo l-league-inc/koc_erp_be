@@ -480,6 +480,81 @@ def _history(session: AgentSession) -> list[dict[str, str]]:
     return [{"role": message.role, "content": message.content} for message in messages]
 
 
+_LEDGER_LIMIT = 30
+
+
+def _action_label(action: ProposedAction) -> str:
+    payload = action.payload or {}
+    result = action.result or {}
+    parts: list[str] = []
+    if action.kind in {ProposedAction.Kind.CREATE_RECORD, ProposedAction.Kind.UPDATE_RECORD}:
+        title = _preview(str(payload.get("title") or ""))
+        record_id = result.get("record_id") or payload.get("record_id")
+        if title:
+            parts.append(f"제목 {title}")
+        if record_id:
+            parts.append(f"record_id {record_id}")
+    elif action.kind in {ProposedAction.Kind.CREATE_SKILL, ProposedAction.Kind.UPDATE_SKILL}:
+        name = _preview(str(payload.get("name") or result.get("name") or ""))
+        if name:
+            parts.append(f"이름 {name}")
+        if result.get("skill_id"):
+            parts.append(f"skill_id {result['skill_id']}")
+    elif action.kind == ProposedAction.Kind.SEND_MAIL:
+        subject = _preview(str(payload.get("subject") or ""))
+        if subject:
+            parts.append(f"제목 {subject}")
+    elif action.kind == ProposedAction.Kind.CREATE_ESTIMATE:
+        client = _preview(str(payload.get("client") or ""))
+        filename = _preview(str(result.get("filename") or ""))
+        if client:
+            parts.append(f"거래처 {client}")
+        if filename:
+            parts.append(f"파일 {filename}")
+    return " ".join(parts)
+
+
+def _action_ledger(session: AgentSession) -> str:
+    actions = list(session.proposed_actions.order_by("-id")[: _LEDGER_LIMIT + 1])
+    hidden = len(actions) > _LEDGER_LIMIT
+    actions = list(reversed(actions[:_LEDGER_LIMIT]))
+    if not actions:
+        return "이 대화의 초안은 없습니다."
+    lines = ["이 대화의 초안 상태입니다."]
+    if hidden:
+        lines.append(f"최근 {_LEDGER_LIMIT}건만 표시합니다.")
+    for action in actions:
+        label = _action_label(action)
+        suffix = f" {label}" if label else ""
+        lines.append(f"- id {action.id} {action.kind} {action.status}{suffix}")
+    lines.append(
+        "pending은 아직 반영 전입니다. 같은 내용의 초안을 다시 만들지 않습니다. "
+        "confirmed는 사용자가 확정하여 이미 반영되었습니다. "
+        "레코드를 이어서 고칠 때는 적힌 record_id로 propose_update_record를 사용합니다. "
+        "confirmed 메일은 다시 propose_send_mail하지 않습니다. "
+        "confirmed 견적서는 파일이 만들어진 상태입니다."
+    )
+    return "\n".join(lines)
+
+
+def _confirm_notice(
+    records: list[dict[str, Any]],
+    skills: list[dict[str, Any]],
+    mails: list[dict[str, Any]],
+    estimates: list[dict[str, Any]],
+) -> str:
+    parts: list[str] = []
+    for item in records:
+        parts.append(f"레코드 {item['record_id']} {item['title']}")
+    for item in skills:
+        parts.append(f"스킬 {item['name']}")
+    for item in mails:
+        parts.append(f"메일 {item['subject']}")
+    for item in estimates:
+        parts.append(f"견적서 {item['filename']}")
+    return "확정되어 반영되었습니다. " + ", ".join(parts) + "."
+
+
 def _system_prompt(session: AgentSession, user) -> str:
     scope = session.database_slug or "전체"
     index = skillbook.active_index(session.workspace_id)
@@ -499,17 +574,20 @@ def _system_prompt(session: AgentSession, user) -> str:
         "people 속성에만 list_members의 user_id를 사용합니다. "
         "아래는 스킬 이름과 설명입니다. 본문은 포함되어 있지 않습니다. "
         "사용자 문장이 설명과 맞으면 view_skill로 전문을 읽고 그 절차를 따릅니다. "
-        "레코드나 스킬을 만들거나 고칠 때는 propose 도구만 사용하고, 저장이 끝났다고 말하지 않습니다. "
+        "레코드나 스킬을 만들거나 고칠 때는 propose 도구만 사용합니다. "
+        "pending 초안은 아직 반영 전입니다. "
+        "confirmed로 적힌 항목은 이미 반영된 사실이니 그 내용을 다시 propose하지 않습니다. "
         "회사 밖 사실(정부지원사업, 공고, 뉴스, 법령)은 web_search로 확인하고 출처 URL을 함께 안내합니다. "
         "검색하지 않은 내용을 지어내지 않습니다. "
         "회사 문서는 search_documents로 찾고 get_document의 extracted_text로 본문을 읽습니다. "
         "이미지, 음성, 영상은 kind와 media_kind로 고릅니다. "
         "개인 문서는 이 사용자 것만 나옵니다. "
         "메일은 list_mails와 get_mail로 읽고, 보낼 때는 propose_send_mail만 씁니다. "
-        "발송이 끝났다고 말하지 않습니다. "
+        "pending 메일은 발송 전입니다. confirmed 메일은 이미 발송되었습니다. "
         "견적서 파일은 propose_create_estimate만 씁니다. 행 금액과 합계는 넣지 않습니다. "
         "확정 결과는 미리보기이며, PDF를 받았거나 메일을 보냈다고 말하지 않습니다.\n"
-        f"{catalog}"
+        f"{catalog}\n\n"
+        f"{_action_ledger(session)}"
     )
 
 
@@ -838,8 +916,14 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
             raise HttpError(400, "지원하지 않는 초안입니다.")
         action.status = ProposedAction.Status.CONFIRMED
         action.save(update_fields=["status", "result", "updated_at"])
+    notice = AgentMessage.objects.create(
+        session=session,
+        role=AgentMessage.Role.ASSISTANT,
+        content=_confirm_notice(records, skills, mails, estimates),
+    )
     session.save(update_fields=["updated_at"])
     return {
+        "message": serialize_message(notice),
         "proposed_actions": [serialize_action(action) for action in actions],
         "records": records,
         "skills": skills,

@@ -114,6 +114,9 @@ class AgentApiTests(TestCase):
         )
         self.assertEqual(confirmed.status_code, 200, confirmed.json())
         record_id = confirmed.json()["records"][0]["record_id"]
+        notice = confirmed.json()["message"]["content"]
+        self.assertEqual(notice, f"확정되어 반영되었습니다. 레코드 {record_id} 출근.")
+        self.assertEqual(confirmed.json()["message"]["role"], "assistant")
         self.assertIsInstance(confirmed.json()["records"][0]["database_id"], int)
         activity = await sync_to_async(RecordActivity.objects.get)(record_id=record_id)
         self.assertEqual(activity.source, RecordActivity.Source.AGENT)
@@ -121,15 +124,16 @@ class AgentApiTests(TestCase):
         listed = await self.client.get("/session", headers=self.headers())
         self.assertEqual(listed.status_code, 200, listed.json())
         self.assertEqual(listed.json()[0]["id"], session_id)
-        self.assertEqual(listed.json()[0]["preview"], "출근 초안을 만들었습니다.")
+        self.assertEqual(listed.json()[0]["preview"], notice)
 
         detail = await self.client.get(f"/session/{session_id}", headers=self.headers())
         self.assertEqual(detail.status_code, 200, detail.json())
         self.assertEqual(
             [item["role"] for item in detail.json()["messages"]],
-            ["user", "assistant"],
+            ["user", "assistant", "assistant"],
         )
         self.assertEqual(detail.json()["messages"][0]["content"], "오늘 출근 등록해줘")
+        self.assertEqual(detail.json()["messages"][2]["content"], notice)
         self.assertEqual(detail.json()["proposed_actions"][0]["status"], "confirmed")
 
         hidden = await self.client.get(
@@ -137,6 +141,67 @@ class AgentApiTests(TestCase):
             headers=self.headers(self.outsider),
         )
         self.assertEqual(hidden.status_code, 404)
+
+    async def test_next_turn_sees_confirmed_draft(self):
+        workspace_id = await self._workspace_id()
+        created = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id, "database_slug": "hr"},
+            headers=self.headers(),
+        )
+        session_id = created.json()["id"]
+        seen: dict[str, str] = {}
+
+        def _latest_user(messages) -> str:
+            users = [item.get("content") for item in messages if item.get("role") == "user"]
+            return users[-1] if users else ""
+
+        def _capture(messages, tools, model=None):
+            if any(item.get("role") == "tool" for item in messages):
+                return {"content": "출근 초안을 만들었습니다.", "tool_calls": []}
+            latest = _latest_user(messages)
+            if latest == "아직이야":
+                seen["pending"] = messages[0]["content"]
+                return {"content": "확정 전입니다.", "tool_calls": []}
+            if latest == "제목 바꿔줘":
+                seen["confirmed"] = messages[0]["content"]
+                seen["history"] = "\n".join(
+                    item.get("content") or ""
+                    for item in messages
+                    if item.get("role") in {"user", "assistant"}
+                )
+                return {"content": "저장된 출근 기록을 고치겠습니다.", "tool_calls": []}
+            return _fake_complete(messages, tools, model)
+
+        with patch("assistant.agent.llm.complete", _capture):
+            message = await self.client.post(
+                f"/session/{session_id}/message",
+                json={"content": "오늘 출근 등록해줘"},
+                headers=self.headers(),
+            )
+            action = message.json()["proposed_actions"][0]
+            waiting = await self.client.post(
+                f"/session/{session_id}/message",
+                json={"content": "아직이야"},
+                headers=self.headers(),
+            )
+            self.assertEqual(waiting.status_code, 200, waiting.json())
+            confirmed = await self.client.post(
+                f"/session/{session_id}/confirm",
+                json={"action_ids": [action["id"]]},
+                headers=self.headers(),
+            )
+            record_id = confirmed.json()["records"][0]["record_id"]
+            follow = await self.client.post(
+                f"/session/{session_id}/message",
+                json={"content": "제목 바꿔줘"},
+                headers=self.headers(),
+            )
+        self.assertEqual(follow.status_code, 200, follow.json())
+        self.assertIn(f"id {action['id']} create_record pending", seen["pending"])
+        self.assertIn(f"id {action['id']} create_record confirmed", seen["confirmed"])
+        self.assertIn(f"record_id {record_id}", seen["confirmed"])
+        self.assertIn(confirmed.json()["message"]["content"], seen["history"])
 
     async def test_outsider_cannot_start_session(self):
         workspace_id = await self._workspace_id()

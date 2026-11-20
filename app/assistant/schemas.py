@@ -105,6 +105,7 @@ class ConfirmedEstimateSchema(Schema):
 
 
 class ConfirmResultSchema(Schema):
+    message: MessageResponseSchema
     proposed_actions: list[ProposedActionResponseSchema]
     records: list[ConfirmedRecordSchema]
     skills: list[ConfirmedSkillSchema]

@@ -14,8 +14,10 @@ public sealed class KocClient : IKocApi, IDisposable
     private readonly HttpClient _api;
     private readonly HttpClient _blobs;
     private readonly ITokenStore _tokens;
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private string? _access;
     private string? _refresh;
+    private Task? _refreshing;
 
     public KocClient(Uri baseAddress, ITokenStore tokens, HttpMessageHandler? handler = null)
     {
@@ -274,6 +276,27 @@ public sealed class KocClient : IKocApi, IDisposable
     }
 
     private async Task RefreshAsync(CancellationToken cancellationToken)
+    {
+        Task pending;
+        await _refreshGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_refreshing is null || _refreshing.IsCompleted)
+            {
+                _refreshing = RefreshCoreAsync(cancellationToken);
+            }
+
+            pending = _refreshing;
+        }
+        finally
+        {
+            _refreshGate.Release();
+        }
+
+        await pending;
+    }
+
+    private async Task RefreshCoreAsync(CancellationToken cancellationToken)
     {
         var pair = await SendAsync<TokenPair>(
             HttpMethod.Post,

@@ -367,6 +367,13 @@ internal sealed class TrayApplication : ApplicationContext
         catch (Exception exception)
         {
             Volatile.Write(ref _announceSync, 0);
+            if (MissingRefresh(exception.Message))
+            {
+                Logout("로그인되지 않음");
+                Report("로그인이 만료되었습니다. 다시 로그인하세요.");
+                return;
+            }
+
             Report(exception.Message);
         }
     }
@@ -499,6 +506,13 @@ internal sealed class TrayApplication : ApplicationContext
         catch (Exception exception)
         {
             Interlocked.Exchange(ref _announceSync, 0);
+            if (MissingRefresh(exception.Message))
+            {
+                Logout("로그인되지 않음");
+                Report("로그인이 만료되었습니다. 다시 로그인하세요.");
+                return;
+            }
+
             Report(exception.Message);
         }
         finally
@@ -877,6 +891,9 @@ internal sealed class TrayApplication : ApplicationContext
         var text = notes.Trim();
         return text.Length <= 300 ? text : text[..300];
     }
+
+    private static bool MissingRefresh(string message) =>
+        message.Contains("존재하지 않는 토큰입니다", StringComparison.Ordinal);
 
     private void Report(string message) => Notify(message);
 

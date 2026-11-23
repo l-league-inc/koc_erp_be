@@ -11,7 +11,7 @@ Windows 트레이 앱이 워크스페이스 공유 문서함을 탐색기에 보
 
 ## 유저 플로우
 
-1. 이메일과 비밀번호로 `POST /api/v1/auth/login`에 로그인합니다. `refresh`는 Windows 자격 증명 관리자에 두고, `access`는 메모리에만 둡니다. 만료되면 `POST /api/v1/auth/refresh`로 바꿉니다.
+1. 이메일과 비밀번호로 `POST /api/v1/auth/login`에 로그인합니다. `refresh`는 Windows 자격 증명 관리자에 두고, `access`는 메모리에만 둡니다. 만료되면 `POST /api/v1/auth/refresh`로 바꿉니다. 이 응답의 `refresh`는 로그인 때와 같은 값입니다.
 2. `GET /api/v1/workspace`로 워크스페이스를 고릅니다. 하나가 아니면 처음 한 번만 고르고 기억합니다.
 3. `GET /api/v1/document/{workspace_id}/space`에서 `kind`가 `shared`인 문서함을 고릅니다.
 4. 앱이 켜지면 `%USERPROFILE%\KOC ERP` 폴더를 만들고, 바탕화면 `KOC ERP` 바로가기로 그 폴더를 엽니다. 바로가기·알림 영역·탐색기 아이콘은 웹과 같은 KOC 원형 마크입니다. 로그인·설정·워크스페이스 창 위에는 가로 KOC 로고가 있습니다. 이미 바로가기가 있어도 아이콘은 다시 맞춥니다. 로그인한 뒤에 이 폴더를 동기화 루트로 등록합니다. 탐색기 탐색 창 이름은 KOC ERP입니다.

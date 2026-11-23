@@ -243,11 +243,14 @@ async def refresh_api(request, payload: Optional[schema.TokenRefreshSchema] = No
     access, access_exp = utils.get_access_token(
         {"user_id": active_jwt.user.id, "env": settings.DJANGO_ENV_NAME}
     )
-    refresh, refresh_exp = utils.get_refresh_token()
-
+    # refresh 문자열은 바꾸지 않는다. 드라이브는 이 값을 자격 증명 관리자에 두고
+    # 켤 때마다 다시 보낸다. 값을 바꾸면 저장에 실패한 1.3.0은 다음부터 거절된다.
+    refresh_exp = timezone.datetime.fromtimestamp(
+        token_verification["exp"],
+        tz=timezone.get_current_timezone(),
+    )
     active_jwt.access = access
-    active_jwt.refresh = refresh
-    await active_jwt.asave()
+    await active_jwt.asave(update_fields=["access"])
 
     is_flutter = getattr(request, "is_flutter", False)
     response = JsonResponse(

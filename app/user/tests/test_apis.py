@@ -327,6 +327,17 @@ class TestAuth(TestCase):
         self.assertIn("access", cookies)
         self.assertIn("refresh", cookies)
 
+    async def test_refresh_keeps_the_same_refresh_token(self):
+        refresh = await self.authenticate_refresh()
+        first = await self.client.post("/refresh", json={"refresh": refresh})
+        second = await self.client.post("/refresh", json={"refresh": refresh})
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(first.json()["refresh"], refresh)
+        self.assertEqual(second.json()["refresh"], refresh)
+        self.assertTrue(first.json()["access"])
+        self.assertTrue(second.json()["access"])
+
     async def test_token_verify(self):
         """토큰 검증 테스트"""
         headers = await self.authenticate()

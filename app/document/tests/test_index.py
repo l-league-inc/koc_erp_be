@@ -7,7 +7,7 @@ from django.test import TestCase
 from ninja.errors import HttpError
 
 from document.indexer import EncryptedPdfError, build_index, extract_text
-from document.models import DocumentIndex, DocumentSpace
+from document.models import DocumentFile, DocumentIndex, DocumentSpace
 from document.storage import build_object_key
 from document.utils import create_file, create_folder, ensure_spaces
 from workspace.models import Workspace, WorkspaceMember
@@ -45,6 +45,16 @@ class DocumentIndexTests(TestCase):
             },
         )
         return created["id"]
+
+    def test_large_file_skips_body_without_download(self):
+        file_id = self._register(self.shared_root, "현장.bin", "application/octet-stream")
+        DocumentFile.objects.filter(id=file_id).update(size=51 * 1024 * 1024)
+        with patch("document.indexer.download_to_temp") as download:
+            build_index(file_id)
+        download.assert_not_called()
+        index = DocumentIndex.objects.get(file_id=file_id)
+        self.assertEqual(index.index_status, DocumentIndex.Status.SKIPPED)
+        self.assertEqual(index.error, "50MB를 넘는 파일은 본문을 읽지 않습니다.")
 
     def test_personal_index_stays_local(self):
         file_id = self._register(self.personal_root, "leave.txt", "text/plain")

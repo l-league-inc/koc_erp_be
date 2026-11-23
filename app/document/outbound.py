@@ -52,11 +52,13 @@ class UploadResponseSchema(Schema):
     object_key: str
     content_type: str
     expires_in: int
+    estimated_seconds: int
 
 
 class DownloadResponseSchema(Schema):
     url: str
     expires_in: int
+    estimated_seconds: int
 
 
 class SearchHitSchema(Schema):

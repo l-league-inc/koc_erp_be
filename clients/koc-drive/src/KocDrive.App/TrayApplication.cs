@@ -430,7 +430,7 @@ internal sealed class TrayApplication : ApplicationContext
         _watcher?.Dispose();
         _connection?.Dispose();
         var content = new DiskContent(_syncRoot);
-        _engine = new SyncEngine(_client, _store, content, workspaceId, spaceId, rootFolderId);
+        _engine = new SyncEngine(_client, _store, content, workspaceId, spaceId, rootFolderId, Report);
         await ShellSyncRoot.RegisterAsync(_syncRoot);
         _connection = new SyncRootConnection(_engine, _syncRoot, Report);
         _connection.Connect();

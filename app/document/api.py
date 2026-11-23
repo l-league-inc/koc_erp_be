@@ -156,7 +156,11 @@ async def delete_folder_api(request, workspace_id: int, folder_id: int):
 @router.post(
     "/{workspace_id}/upload",
     summary="[C] 문서 업로드 URL 생성",
-    description="비공개 S3에 문서를 올리기 위한 URL을 만듭니다. 최대 50MB이며 만료는 300초입니다.",
+    description=(
+        "비공개 S3에 문서를 올리기 위한 URL을 만듭니다. 최대 1GB입니다. "
+        "expires_in은 작은 파일 300초에서 큰 파일 2시간까지이고, "
+        "estimated_seconds는 10Mbps로 올릴 때 예상 시간입니다."
+    ),
     response=UploadResponseSchema,
     auth=jwt_auth,
 )
@@ -183,7 +187,7 @@ async def create_upload_api(request, workspace_id: int, payload: UploadRequestSc
         "영상 요약은 첫 장면만입니다. "
         "개인 문서함 미디어는 색인하지 않아 본문이 비어 있습니다. "
         "본문은 문서 상세 조회로 읽습니다. "
-        "다운로드 URL은 300초짜리 첨부 주소라 내용을 대신 읽지 못합니다."
+        "다운로드 URL은 첨부 주소라 내용을 대신 읽지 못합니다. 작은 파일은 300초 뒤 만료됩니다."
     ),
     response=list[SearchHitSchema],
     auth=jwt_auth,
@@ -206,7 +210,11 @@ async def list_mail_api(request, workspace_id: int, file_id: int):
 @router.post(
     "/{workspace_id}/file/{file_id}/download",
     summary="[C] 다운로드 URL 생성",
-    description="문서 다운로드 URL을 만들고 다운로드 이력을 남깁니다. URL은 300초 뒤 만료됩니다.",
+    description=(
+        "문서 다운로드 URL을 만들고 다운로드 이력을 남깁니다. "
+        "expires_in은 작은 파일 300초에서 큰 파일 2시간까지이고, "
+        "estimated_seconds는 10Mbps로 받을 때 예상 시간입니다."
+    ),
     response=DownloadResponseSchema,
     auth=jwt_auth,
 )
@@ -218,7 +226,10 @@ async def create_download_api(request, workspace_id: int, file_id: int):
 @router.post(
     "/{workspace_id}/file/{file_id}/sync-url",
     summary="[C] 동기화 다운로드 URL",
-    description="동기화 클라이언트가 파일 내용을 받기 위한 URL을 만듭니다. 다운로드 이력은 남기지 않습니다.",
+    description=(
+        "동기화 클라이언트가 파일 내용을 받기 위한 URL을 만듭니다. 다운로드 이력은 남기지 않습니다. "
+        "expires_in과 estimated_seconds는 파일 크기에 따릅니다."
+    ),
     response=DownloadResponseSchema,
     auth=jwt_auth,
 )
@@ -229,7 +240,11 @@ async def create_sync_url_api(request, workspace_id: int, file_id: int):
 @router.post(
     "/{workspace_id}/file/{file_id}/upload",
     summary="[C] 문서 내용 교체 URL",
-    description="기존 문서의 새 내용을 올리기 위한 URL을 만듭니다. base_hash가 현재 해시와 다르면 409입니다.",
+    description=(
+        "기존 문서의 새 내용을 올리기 위한 URL을 만듭니다. "
+        "expires_in과 estimated_seconds는 새 파일 크기에 따릅니다. "
+        "base_hash가 현재 해시와 다르면 409입니다."
+    ),
     response=UploadResponseSchema,
     auth=jwt_auth,
 )

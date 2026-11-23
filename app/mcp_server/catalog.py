@@ -61,7 +61,7 @@ _MEDIA_READ_NOTE = (
     "개인 문서함 미디어는 색인하지 않아 본문이 비어 있습니다. "
     "media_kind는 image, audio, video이고 그 외는 빈 문자열입니다. "
     "kind 쿼리로 그 종류만 고를 수 있습니다. "
-    "다운로드 URL은 300초짜리 첨부 주소라 내용을 대신 읽지 못합니다."
+    "다운로드 URL은 첨부 주소라 내용을 대신 읽지 못합니다. 작은 파일은 300초 뒤 만료됩니다."
 )
 PUBLIC_ENDPOINTS = frozenset(
     {
@@ -401,7 +401,7 @@ def tool_safety(method: str, path: str) -> dict[str, Any]:
         }
     elif key == DOCUMENT_DOWNLOAD:
         justifications = {
-            "read_only_justification": "다운로드 이력을 남기고 300초 뒤 만료되는 첨부 URL을 돌려줍니다. 파일 내용은 바꾸지 않습니다.",
+            "read_only_justification": "다운로드 이력을 남기고 첨부 URL을 돌려줍니다. 작은 파일은 300초 뒤 만료되고 큰 파일은 더 깁니다. 파일 내용은 바꾸지 않습니다.",
             "open_world_justification": "KOC ERP API만 호출하고 공개 인터넷에 글을 올리지 않습니다.",
             "destructive_justification": "파일을 지우거나 덮어쓰지 않습니다.",
         }
@@ -458,7 +458,7 @@ def _description(method: str, path: str, summary: str, detail: str) -> str:
         )
     elif (method, path) == DOCUMENT_DOWNLOAD:
         lines.append(
-            "다운로드 이력을 남기고 300초 뒤 만료되는 첨부 URL을 돌려줍니다. "
+            "다운로드 이력을 남기고 첨부 URL을 돌려줍니다. 작은 파일은 300초 뒤 만료되고 큰 파일은 더 깁니다. "
             "이 URL로 이미지, 음성, 영상 내용을 읽지 못합니다. 본문은 문서 상세의 extracted_text입니다. "
             "실패해도 자동으로 다시 호출하지 않습니다."
         )

@@ -19,7 +19,6 @@ from document.models import (
 )
 from document.names import is_windows_name
 from document.storage import (
-    PRESIGN_EXPIRES,
     assert_object_key,
     assert_size,
     build_object_key,
@@ -28,6 +27,7 @@ from document.storage import (
     display_filename,
     presign_get,
     presign_put,
+    transfer_timing,
 )
 from workspace.models import WorkspaceMember
 from workspace.utils import MCP_CLIENT_HEADER, get_membership
@@ -131,11 +131,13 @@ def create_upload(
     cleaned_type = clean_content_type(content_type)
     display_filename(file_name)
     object_key = build_object_key(workspace_id, file_name)
+    expires, estimated = transfer_timing(size)
     return {
-        "upload_url": presign_put(object_key, cleaned_type),
+        "upload_url": presign_put(object_key, cleaned_type, expires),
         "object_key": object_key,
         "content_type": cleaned_type,
-        "expires_in": PRESIGN_EXPIRES,
+        "expires_in": expires,
+        "estimated_seconds": estimated,
     }
 
 
@@ -303,11 +305,13 @@ def create_replace_upload(
     assert_size(size)
     cleaned_type = clean_content_type(content_type)
     object_key = build_object_key(workspace_id, file.original_filename)
+    expires, estimated = transfer_timing(size)
     return {
-        "upload_url": presign_put(object_key, cleaned_type),
+        "upload_url": presign_put(object_key, cleaned_type, expires),
         "object_key": object_key,
         "content_type": cleaned_type,
-        "expires_in": PRESIGN_EXPIRES,
+        "expires_in": expires,
+        "estimated_seconds": estimated,
     }
 
 
@@ -337,9 +341,11 @@ def replace_file_content(user, workspace_id: int, file_id: int, data: dict) -> d
 
 def create_sync_url(user, workspace_id: int, file_id: int) -> dict:
     _membership, file = _get_file(user, workspace_id, file_id)
+    expires, estimated = transfer_timing(file.size)
     return {
-        "url": presign_get(file.object_key, file.original_filename),
-        "expires_in": PRESIGN_EXPIRES,
+        "url": presign_get(file.object_key, file.original_filename, expires),
+        "expires_in": expires,
+        "estimated_seconds": estimated,
     }
 
 
@@ -370,9 +376,10 @@ def list_changes(user, workspace_id: int, space_id: int, cursor: int) -> dict:
 
 def create_download(user, workspace_id: int, file_id: int, source: str) -> dict:
     _membership, file = _get_file(user, workspace_id, file_id)
-    url = presign_get(file.object_key, file.original_filename)
+    expires, estimated = transfer_timing(file.size)
+    url = presign_get(file.object_key, file.original_filename, expires)
     DocumentDownload.objects.create(file=file, user=user, source=source)
-    return {"url": url, "expires_in": PRESIGN_EXPIRES}
+    return {"url": url, "expires_in": expires, "estimated_seconds": estimated}
 
 
 def list_mail_logs(user, workspace_id: int, file_id: int) -> list[dict]:

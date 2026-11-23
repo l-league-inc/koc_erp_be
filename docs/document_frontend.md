@@ -28,16 +28,16 @@ audience: frontend
 - `POST /folder` `{parent_id, name}` 생성. 201
 - `PATCH /folder/{folder_id}` `{name?, parent_id?}` 이름 변경 또는 같은 공간 이동
 - `DELETE /folder/{folder_id}` 빈 폴더 삭제. 204
-- `POST /upload` `{folder_id, file_name, content_type, size}` → `upload_url`, `object_key`, `content_type`, `expires_in`
+- `POST /upload` `{folder_id, file_name, content_type, size}` → `upload_url`, `object_key`, `content_type`, `expires_in`, `estimated_seconds`
 - `POST /file` `{folder_id, object_key, original_filename, content_type, size, content_hash?}` 등록. 201. `content_hash`는 SHA-256 소문자 64자이고, 없으면 빈 문자열입니다
 - `GET /file?folder_id=` 폴더 안 파일
 - `GET /file/search?q=&kind=` 검색 결과. `kind`는 생략하거나 `image`, `audio`, `video`
 - `GET /file/{file_id}` 상세. `extracted_text`, `error` 포함
 - `PATCH /file/{file_id}` `{folder_id?, original_filename?}` 같은 문서함 이동 또는 이름 변경. 둘 중 하나 이상
 - `DELETE /file/{file_id}` 소프트 삭제. 204. S3 객체는 지우지 않습니다
-- `POST /file/{file_id}/download` `{url, expires_in}`
-- `POST /file/{file_id}/sync-url` `{url, expires_in}`. 다운로드 이력을 만들지 않습니다
-- `POST /file/{file_id}/upload` `{content_type, size, base_hash}` 내용 교체용 PUT URL. `base_hash`가 현재 `content_hash`와 다르면 409
+- `POST /file/{file_id}/download` `{url, expires_in, estimated_seconds}`
+- `POST /file/{file_id}/sync-url` `{url, expires_in, estimated_seconds}`. 다운로드 이력을 만들지 않습니다
+- `POST /file/{file_id}/upload` `{content_type, size, base_hash}` 내용 교체용 PUT URL. 응답은 업로드 URL과 같고 `estimated_seconds`를 포함합니다. `base_hash`가 현재 `content_hash`와 다르면 409
 - `POST /file/{file_id}/content` `{object_key, content_type, size, base_hash, content_hash}` 교체 확정. 해시를 바꾸고 색인을 다시 겁니다. 불일치하면 409
 - `POST /file/{file_id}/reindex` 올린 사람만. 상세와 같은 응답
 - `GET /file/{file_id}/mail` 발송 이력
@@ -48,11 +48,11 @@ audience: frontend
 
 파일 항목은 `id`, `workspace_id`, `space_id`, `space_kind`, `folder_id`, `original_filename`, `content_type`, `size`, `uploaded_by_id`, `path`, `index_status`, `index_source`, `description_ko`, `tags_ko`, `content_hash`, `created_at`, `updated_at`입니다. 상세만 `extracted_text`, `error`가 있습니다. 같은 폴더의 파일 이름은 하나만 허용합니다.
 
-`index_status`는 `pending`, `processing`, `ready`, `failed`, `skipped`입니다. `index_source`는 `local` 또는 `llm`입니다. 공유 문서함의 PDF, DOCX, HWP, HWPX, txt, md, csv는 본문을 추출한 뒤 언어 모델로 요약합니다. 본문의 NUL과 서로게이트는 제거한 뒤 저장합니다. 암호가 걸린 PDF는 빈 암호로 한 번 연 뒤, 열리지 않으면 `skipped`이고 `error`는 `암호가 걸린 PDF라 본문을 읽지 못했습니다.`입니다. 암호가 걸린 한글 문서는 읽지 못해 색인이 실패합니다. 공유 문서함의 이미지는 장면을 설명하고, 영상은 중간 장면을 설명하고, 오디오는 앞부분을 전사한 뒤 요약합니다. 개인 문서함은 본문을 추출할 수 있는 파일만 저장하고 언어 모델을 호출하지 않습니다. 그 외 형식은 `skipped`입니다.
+`index_status`는 `pending`, `processing`, `ready`, `failed`, `skipped`입니다. `index_source`는 `local` 또는 `llm`입니다. 50MB를 넘는 파일은 저장만 하고 본문을 읽지 않습니다. 이때 `index_status`는 `skipped`이고 `error`는 `50MB를 넘는 파일은 본문을 읽지 않습니다.`입니다. 공유 문서함의 PDF, DOCX, HWP, HWPX, txt, md, csv는 본문을 추출한 뒤 언어 모델로 요약합니다. 본문의 NUL과 서로게이트는 제거한 뒤 저장합니다. 암호가 걸린 PDF는 빈 암호로 한 번 연 뒤, 열리지 않으면 `skipped`이고 `error`는 `암호가 걸린 PDF라 본문을 읽지 못했습니다.`입니다. 암호가 걸린 한글 문서는 읽지 못해 색인이 실패합니다. 공유 문서함의 이미지는 장면을 설명하고, 영상은 중간 장면을 설명하고, 오디오는 앞부분을 전사한 뒤 요약합니다. 개인 문서함은 본문을 추출할 수 있는 파일만 저장하고 언어 모델을 호출하지 않습니다. 그 외 형식은 `skipped`입니다.
 
 검색 항목은 `id`, `original_filename`, `folder_id`, `folder_path`, `content_type`, `space_kind`, `media_kind`, `tags_ko`, `index_status`, `description_ko`, `score`입니다. `media_kind`는 `image`, `audio`, `video`이고 그 외 파일은 빈 문자열입니다. 공유 문서와 내 개인 문서만 나옵니다. 잘못된 `kind`는 400입니다.
 
-업로드 URL과 다운로드 URL은 300초 뒤 만료됩니다. 파일 크기는 1바이트 이상 50MB 이하입니다. `object_key`는 업로드 응답 값을 그대로 등록 API에 넣습니다.
+파일 크기는 1바이트 이상 1GB 이하입니다. `estimated_seconds`는 10Mbps로 옮길 때 예상 시간(초)입니다. 올리거나 받기 전에 이 값으로 남은 시간을 안내합니다. `expires_in`은 그 주소가 살아있는 시간입니다. 작은 파일은 300초이고, 큰 파일은 더 길어 최대 2시간입니다. `expires_in`이 지나면 URL 발급부터 다시 합니다. `object_key`는 업로드 응답 값을 그대로 등록 API에 넣습니다.
 
 메일 이력 항목은 `id`, `file_id`, `sender_id`, `recipients`, `subject`, `status`(`pending`/`sent`/`failed`), `sent_at`, `error`, `created_at`입니다.
 
@@ -62,7 +62,7 @@ audience: frontend
 
 - 문서함 진입 시 `space`를 먼저 호출하고, 공유와 개인을 `kind`로 나눕니다.
 - 폴더 트리는 `root_folder_id`와 `parent_id`로 펼칩니다. 루트 폴더는 목록에 다시 그리지 않습니다.
-- 업로드는 URL 발급, PUT, 등록 순서입니다. 등록 응답의 `index_status`가 `pending`이면 색인 중입니다.
+- 업로드는 URL 발급, PUT, 등록 순서입니다. PUT 전에 `estimated_seconds`로 예상 시간을 보여 줍니다. 등록 응답의 `index_status`가 `pending`이면 색인 중입니다. 50MB를 넘는 파일의 `skipped`는 실패가 아니라 본문을 읽지 않은 상태입니다.
 - 다운로드 버튼은 `download` POST를 호출한 뒤 받은 URL로 이동합니다.
 - 검색 결과에서 상세로 들어가면 `extracted_text`를 미리보기로 씁니다. 미디어만 보여 줄 때는 `kind`를 붙입니다.
 - 메일 이력 화면은 목록 API만 붙이고, 보내기 버튼은 두지 않습니다.
@@ -71,7 +71,7 @@ audience: frontend
 
 문서함 조회, 검색, 상세, 다운로드는 MCP에 열려 있습니다. 업로드, 수정, 삭제, 재색인, 동기화 URL은 열리지 않습니다.
 
-검색의 `media_kind`로 이미지, 오디오, 영상을 구분합니다. 공유 문서함 이미지는 장면 설명, 오디오는 앞 180초 전사, 영상은 장면 설명이 상세 `extracted_text`에 있습니다. 영상 `description_ko`는 첫 장면만입니다. 개인 문서함 미디어는 색인하지 않아 본문이 비어 있습니다. 다운로드는 300초짜리 첨부 URL이고, 그 주소로 내용을 읽지 않습니다.
+검색의 `media_kind`로 이미지, 오디오, 영상을 구분합니다. 공유 문서함 이미지는 장면 설명, 오디오는 앞 180초 전사, 영상은 장면 설명이 상세 `extracted_text`에 있습니다. 영상 `description_ko`는 첫 장면만입니다. 개인 문서함 미디어는 색인하지 않아 본문이 비어 있습니다. 다운로드는 첨부 URL이고, 그 주소로 내용을 읽지 않습니다. 작은 파일은 300초 뒤 만료됩니다.
 
 ## 비범위
 

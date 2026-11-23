@@ -4,7 +4,9 @@ namespace KocDrive.Core.Sync;
 
 public sealed class SyncEngine
 {
-    public const int MaxBytes = 50 * 1024 * 1024;
+    public const long MaxBytes = 1024L * 1024L * 1024L;
+
+    public const string SizeLimitMessage = "파일 크기는 1바이트 이상 1GB 이하여야 합니다.";
 
     private readonly IKocApi _api;
     private readonly SyncStore _store;
@@ -12,6 +14,7 @@ public sealed class SyncEngine
     private readonly long _workspaceId;
     private readonly long _spaceId;
     private readonly long _rootFolderId;
+    private readonly Action<string>? _notify;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public SyncEngine(
@@ -20,7 +23,8 @@ public sealed class SyncEngine
         ILocalContent content,
         long workspaceId,
         long spaceId,
-        long rootFolderId)
+        long rootFolderId,
+        Action<string>? notify = null)
     {
         _api = api;
         _store = store;
@@ -28,6 +32,7 @@ public sealed class SyncEngine
         _workspaceId = workspaceId;
         _spaceId = spaceId;
         _rootFolderId = rootFolderId;
+        _notify = notify;
     }
 
     public async Task<IReadOnlyList<SyncEffect>> TickAsync(CancellationToken cancellationToken)
@@ -55,8 +60,16 @@ public sealed class SyncEngine
         }
     }
 
-    public async Task<byte[]> HydrateAsync(long fileId, CancellationToken cancellationToken) =>
-        await _api.DownloadAsync(_workspaceId, fileId, cancellationToken);
+    public async Task<byte[]> HydrateAsync(long fileId, CancellationToken cancellationToken)
+    {
+        var node = _store.Find("file", fileId);
+        if (node is not null)
+        {
+            Announce(TransferTiming.DownloadMessage(node.Name, node.Size));
+        }
+
+        return await _api.DownloadAsync(_workspaceId, fileId, cancellationToken);
+    }
 
     public void QueueLocalWrite(string relativePath)
     {
@@ -429,7 +442,7 @@ public sealed class SyncEngine
 
         if (bytes.Length < 1 || bytes.Length > MaxBytes)
         {
-            effects.Add(new SyncEffect.Status("파일 크기는 1바이트 이상 50MB 이하여야 합니다."));
+            effects.Add(new SyncEffect.Status(SizeLimitMessage));
             node.Dirty = false;
             _store.Save(node);
             return true;
@@ -455,6 +468,7 @@ public sealed class SyncEngine
         var contentType = ContentTypes.ForFileName(node.Name);
         if (node.ServerId > 0)
         {
+            Announce(TransferTiming.UploadMessage(node.Name, bytes.Length));
             var updated = await _api.ReplaceFileAsync(
                 _workspaceId,
                 node.ServerId,
@@ -471,6 +485,7 @@ public sealed class SyncEngine
             return false;
         }
 
+        Announce(TransferTiming.UploadMessage(node.Name, bytes.Length));
         var created = await _api.CreateFileAsync(
             _workspaceId,
             node.ParentServerId,
@@ -608,6 +623,7 @@ public sealed class SyncEngine
     {
         var taken = _store.SiblingNames(node.ParentServerId, "file", node.ServerId).ToHashSet(StringComparer.Ordinal);
         var name = ConflictNames.Copy(node.Name, taken);
+        Announce(TransferTiming.UploadMessage(name, bytes.Length));
         var created = await _api.CreateFileAsync(
             _workspaceId,
             node.ParentServerId,
@@ -672,6 +688,14 @@ public sealed class SyncEngine
         Size = file.Size,
         ContentType = file.ContentType,
     };
+
+    private void Announce(string? message)
+    {
+        if (message is not null)
+        {
+            _notify?.Invoke(message);
+        }
+    }
 
     private static SyncEffect ToUpsert(SyncNode node) =>
         new SyncEffect.Upsert(node.Entity, node.ServerId, node.RelativePath, node.Size, node.ServerHash);

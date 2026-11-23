@@ -263,7 +263,48 @@ public class SyncEngineTests : IDisposable
 
     public void Dispose() => _store.Dispose();
 
-    private SyncEngine Engine() => new(_api, _store, _content, workspaceId: 1, spaceId: 1, rootFolderId: 10);
+    [Fact]
+    public async Task LargeUploadAndHydrateAnnounceTheWait()
+    {
+        var uploadBytes = new byte[TransferTiming.GuideBytesPerSecond * 10];
+        var hash = Hashing.Sha256(uploadBytes);
+        _store.IsInitialized = true;
+        _store.Save(new SyncNode
+        {
+            Entity = "file",
+            ServerId = 3,
+            ParentServerId = 10,
+            Name = "도면.pdf",
+            RelativePath = "도면.pdf",
+            ServerHash = "abc",
+            LocalHash = "abc",
+            BaseHash = "abc",
+            Size = TransferTiming.GuideBytesPerSecond * 60,
+        });
+        _content.Files["도면.pdf"] = uploadBytes;
+        _api.ReplacedHash = hash;
+        var notices = new List<string>();
+        var engine = Engine(notices.Add);
+        engine.QueueLocalWrite("도면.pdf");
+
+        await engine.HydrateAsync(3, CancellationToken.None);
+        await engine.TickAsync(CancellationToken.None);
+
+        Assert.Equal("도면.pdf 파일을 받고 있습니다. 약 1분 걸릴 수 있습니다.", notices[0]);
+        Assert.Equal("도면.pdf 파일을 올리고 있습니다. 약 10초 걸릴 수 있습니다.", notices[1]);
+    }
+
+    [Fact]
+    public void OneGigabyteIsTheUploadCeiling()
+    {
+        Assert.Equal(1024L * 1024L * 1024L, SyncEngine.MaxBytes);
+        Assert.Equal(859, TransferTiming.EstimatedSeconds(SyncEngine.MaxBytes));
+        Assert.Equal("약 14분", TransferTiming.Duration(859));
+        Assert.Null(TransferTiming.UploadMessage("a.txt", 4));
+    }
+
+    private SyncEngine Engine(Action<string>? notify = null) =>
+        new(_api, _store, _content, workspaceId: 1, spaceId: 1, rootFolderId: 10, notify);
 
     private static JsonElement EmptyPayload() => JsonSerializer.SerializeToElement(new { });
 

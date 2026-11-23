@@ -127,6 +127,54 @@ class DocumentApiTests(TestCase):
         self.assertNotIn("images/", object_key)
         self.assertIn("견적서.pdf", object_key)
 
+    async def test_upload_limit_is_1gb_and_estimate_follows_size(self):
+        spaces = await self._spaces(self.member)
+        shared = next(item for item in spaces if item["kind"] == "shared")
+        one_gb = 1024 * 1024 * 1024
+        with patch("document.storage.get_s3_client") as client:
+            client.return_value.generate_presigned_url.return_value = "https://upload.example/put"
+            small = await self.client.post(
+                f"/{self.workspace.id}/upload",
+                json={
+                    "folder_id": shared["root_folder_id"],
+                    "file_name": "짧은.txt",
+                    "content_type": "text/plain",
+                    "size": 4,
+                },
+                headers=self.headers(self.member),
+            )
+            large = await self.client.post(
+                f"/{self.workspace.id}/upload",
+                json={
+                    "folder_id": shared["root_folder_id"],
+                    "file_name": "큰파일.bin",
+                    "content_type": "application/octet-stream",
+                    "size": one_gb,
+                },
+                headers=self.headers(self.member),
+            )
+        self.assertEqual(small.status_code, 200, small.json())
+        self.assertEqual(small.json()["expires_in"], 300)
+        self.assertEqual(small.json()["estimated_seconds"], 1)
+        self.assertEqual(large.status_code, 200, large.json())
+        self.assertEqual(large.json()["estimated_seconds"], 859)
+        self.assertEqual(large.json()["expires_in"], 4355)
+        self.assertEqual(
+            client.return_value.generate_presigned_url.call_args.kwargs["ExpiresIn"],
+            4355,
+        )
+        huge = await self.client.post(
+            f"/{self.workspace.id}/upload",
+            json={
+                "folder_id": shared["root_folder_id"],
+                "file_name": "너무큼.bin",
+                "content_type": "application/octet-stream",
+                "size": one_gb + 1,
+            },
+            headers=self.headers(self.member),
+        )
+        self.assertEqual(huge.status_code, 400)
+
     async def test_register_list_and_reject_foreign_key(self):
         spaces = await self._spaces(self.member)
         shared = next(item for item in spaces if item["kind"] == "shared")
@@ -223,6 +271,7 @@ class DocumentApiTests(TestCase):
         self.assertEqual(user_download.status_code, 200, user_download.json())
         self.assertEqual(mcp_download.status_code, 200, mcp_download.json())
         self.assertEqual(user_download.json()["expires_in"], 300)
+        self.assertEqual(user_download.json()["estimated_seconds"], 1)
         sources = await sync_to_async(list)(
             DocumentDownload.objects.filter(file_id=file_id)
             .order_by("id")

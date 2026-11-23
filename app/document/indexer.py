@@ -482,6 +482,18 @@ def _build_index(file_id: int) -> None:
     index.filename = file.original_filename
     index.save(update_fields=["index_status", "error", "filename", "updated_at"])
 
+    if file.size > 50 * 1024 * 1024:
+        _save_index(
+            index,
+            extracted_text="",
+            description="",
+            tags="",
+            source=DocumentIndex.Source.LOCAL,
+            status=DocumentIndex.Status.SKIPPED,
+            error="50MB를 넘는 파일은 본문을 읽지 않습니다.",
+        )
+        return
+
     suffix = os.path.splitext(file.original_filename)[1]
     path = download_to_temp(file.object_key, suffix)
     try:

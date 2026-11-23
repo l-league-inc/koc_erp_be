@@ -29,7 +29,7 @@ public sealed class KocClient : IKocApi, IDisposable
         _api = handler == null ? new HttpClient(CreateHandler()) : new HttpClient(handler);
         _api.BaseAddress = baseAddress;
         _api.Timeout = TimeSpan.FromSeconds(60);
-        _blobs = new HttpClient(CreateHandler()) { Timeout = TimeSpan.FromMinutes(5) };
+        _blobs = new HttpClient(CreateHandler()) { Timeout = TimeSpan.FromHours(2) };
     }
 
     public async Task LoginAsync(string email, string password, CancellationToken cancellationToken)

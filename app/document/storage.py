@@ -1,3 +1,4 @@
+import math
 import os
 import re
 import tempfile
@@ -8,8 +9,12 @@ from ninja.errors import HttpError
 from config.aws import get_s3_client
 from document.names import is_windows_name
 
-MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
+MAX_DOCUMENT_BYTES = 1024 * 1024 * 1024
 PRESIGN_EXPIRES = 300
+# 안내는 초당 1.25MB(10Mbps)입니다. 주소는 초당 0.25MB(2Mbps)에도 끝나게 5분에서 2시간까지 둡니다.
+GUIDE_BYTES_PER_SECOND = 1_250_000
+SLOW_BYTES_PER_SECOND = 250_000
+MAX_TRANSFER_EXPIRES = 2 * 60 * 60
 
 _FILENAME_SAFE = re.compile(r"[^0-9A-Za-z._\-\uac00-\ud7a3]")
 
@@ -80,9 +85,18 @@ def clean_content_hash(value: str | None, *, required: bool = False) -> str:
     return cleaned
 
 
+def transfer_timing(size: int) -> tuple[int, int]:
+    estimated = max(1, math.ceil(size / GUIDE_BYTES_PER_SECOND))
+    expires = max(
+        PRESIGN_EXPIRES,
+        min(MAX_TRANSFER_EXPIRES, math.ceil(size / SLOW_BYTES_PER_SECOND) + 60),
+    )
+    return expires, estimated
+
+
 def assert_size(size: int) -> None:
     if size < 1 or size > MAX_DOCUMENT_BYTES:
-        raise HttpError(400, "파일 크기는 1바이트 이상 50MB 이하여야 합니다.")
+        raise HttpError(400, "파일 크기는 1바이트 이상 1GB 이하여야 합니다.")
 
 
 def clean_content_type(value: str) -> str:
@@ -99,7 +113,7 @@ def _bucket() -> str:
     return bucket
 
 
-def presign_put(object_key: str, content_type: str) -> str:
+def presign_put(object_key: str, content_type: str, expires_in: int = PRESIGN_EXPIRES) -> str:
     try:
         return get_s3_client().generate_presigned_url(
             "put_object",
@@ -108,7 +122,7 @@ def presign_put(object_key: str, content_type: str) -> str:
                 "Key": object_key,
                 "ContentType": content_type,
             },
-            ExpiresIn=PRESIGN_EXPIRES,
+            ExpiresIn=expires_in,
         )
     except HttpError:
         raise
@@ -116,7 +130,7 @@ def presign_put(object_key: str, content_type: str) -> str:
         raise HttpError(502, "저장소 URL을 만들지 못했습니다.") from None
 
 
-def presign_get(object_key: str, filename: str) -> str:
+def presign_get(object_key: str, filename: str, expires_in: int = PRESIGN_EXPIRES) -> str:
     from urllib.parse import quote
 
     safe = filename.replace('"', "").replace("\r", "").replace("\n", "")
@@ -129,7 +143,7 @@ def presign_get(object_key: str, filename: str) -> str:
                 "Key": object_key,
                 "ResponseContentDisposition": disposition,
             },
-            ExpiresIn=PRESIGN_EXPIRES,
+            ExpiresIn=expires_in,
         )
     except HttpError:
         raise

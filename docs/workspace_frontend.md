@@ -165,7 +165,7 @@ KOC 워크스페이스의 업무 데이터는 `api/v1/workspace`에 있습니다
 }
 ```
 
-`database_slug`, `database_id`, `view_id`를 비우면 멤버인 모든 영역의 행입니다. `view_id`가 있으면 그 데이터베이스로 좁히고, 보기 필터를 요청 필터보다 먼저 적용합니다. 둘 다 AND입니다. 요청 `sorts`가 있으면 보기 정렬 대신 그 정렬을 씁니다. `q`는 제목, 속성 텍스트, 블록에 보이는 글을 찾습니다. 서식 키, 주소, `object_key`는 찾지 않습니다. `page_size` 상한은 100입니다.
+`database_slug`, `database_id`, `view_id`를 비우면 멤버인 모든 영역의 행입니다. 사이드바 최근 문서는 `{page: 1, page_size: 5}`만 보냅니다. 데이터베이스, 검색어, 필터, 정렬이 없는 이 조회는 호출자가 작성한 행만 최신 작성 순으로 최대 5건 돌려줍니다. 같은 조건은 `filters`의 `created_by` `eq` `"me"`로도 지정할 수 있습니다. `view_id`가 있으면 그 데이터베이스로 좁히고, 보기 필터를 요청 필터보다 먼저 적용합니다. 둘 다 AND입니다. 요청 `sorts`가 있으면 보기 정렬 대신 그 정렬을 씁니다. `q`는 제목, 속성 텍스트, 블록에 보이는 글을 찾습니다. 서식 키, 주소, `object_key`는 찾지 않습니다. `page_size` 상한은 100입니다.
 
 연산은 `eq`, `neq`, `contains`, `in`, `gt`, `gte`, `lt`, `lte`, `is_empty`입니다. 사람 속성과 `created_by`, `last_edited_by`의 `"me"`는 호출자 id로 바뀝니다. `in`의 값은 배열입니다. `is_empty`는 `value`가 없어도 됩니다. 필터가 목록이면 모두 AND입니다. 그룹은 `{op: "and"|"or", filters: [...]}`이고, 그 안에 그룹을 한 단계 더 넣을 수 있습니다. 예약 키 `created_at`, `updated_at`, `created_by`, `last_edited_by`는 속성 행 없이 필터와 정렬에 씁니다.
 

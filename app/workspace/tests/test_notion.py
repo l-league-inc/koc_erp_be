@@ -8,7 +8,7 @@ from ninja.testing import TestAsyncClient
 
 from user.utils import get_access_token
 from workspace.api import router
-from workspace.models import Database, Page, Property, RelationLink
+from workspace.models import Database, Page, Property, RelationLink, WorkspaceMember
 from workspace.seed import seed_koc_workspace
 from workspace.utils import create_record, query_records
 
@@ -163,6 +163,47 @@ class NotionWorkspaceTests(TestCase):
         )
         self.assertEqual(grouped.status_code, 200, grouped.json())
         self.assertEqual(grouped.json()["data"][0]["title"], "표제")
+
+    def test_recent_sidebar_query_returns_only_the_author(self):
+        other = User.objects.create_user(
+            email="other@example.com",
+            password="password1234!",
+            status=User.UserStatusChoice.ACTIVE,
+        )
+        WorkspaceMember.objects.create(
+            workspace=self.workspace,
+            user=other,
+            role=WorkspaceMember.Role.MEMBER,
+        )
+        sales = Database.objects.get(workspace=self.workspace, slug="sales")
+        create_record(self.user, sales.id, {"title": "내 문서", "values": {"kind": "A/S"}}, "user")
+        create_record(other, sales.id, {"title": "다른 문서", "values": {"kind": "A/S"}}, "user")
+
+        recent = query_records(self.user, {"page": 1, "page_size": 5})
+        self.assertEqual([row["title"] for row in recent["data"]], ["내 문서"])
+        self.assertEqual(recent["count"], 1)
+
+        filtered = query_records(
+            self.user,
+            {
+                "page": 1,
+                "page_size": 5,
+                "filters": [{"property": "created_by", "op": "eq", "value": "me"}],
+            },
+        )
+        self.assertEqual([row["title"] for row in filtered["data"]], ["내 문서"])
+
+        ledger = query_records(self.user, {"page": 1, "page_size": 20})
+        titles = {row["title"] for row in ledger["data"]}
+        self.assertIn("내 문서", titles)
+        self.assertIn("다른 문서", titles)
+
+        scoped = query_records(
+            self.user,
+            {"database_slug": "sales", "page": 1, "page_size": 5},
+        )
+        scoped_titles = {row["title"] for row in scoped["data"]}
+        self.assertIn("다른 문서", scoped_titles)
 
     def test_query_value_lookups_do_not_grow_with_rows(self):
         sales = Database.objects.get(workspace=self.workspace, slug="sales")

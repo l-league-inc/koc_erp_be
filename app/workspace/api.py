@@ -379,6 +379,8 @@ async def delete_view_api(request, view_id: int):
         "필터와 정렬로 레코드를 조회합니다. "
         "database_slug, database_id, view_id를 모두 비우면 통합관리대장이고, "
         "각 행의 database_slug와 database_name으로 데이터베이스를 구분합니다. "
+        "그중 page 1, page_size 5이고 검색·필터·정렬이 없으면 사이드바 최근 문서라 "
+        "호출자가 작성한 행만 돌려줍니다. "
         "view_id가 있으면 그 보기 필터를 요청 필터보다 먼저 적용합니다. "
         "q는 제목만 찾습니다."
     ),

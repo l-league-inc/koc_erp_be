@@ -2261,6 +2261,20 @@ def _sort_field(props: list[Property]) -> str:
     return "text_value"
 
 
+# 사이드바 최근 문서는 데이터베이스·검색·필터·정렬 없이 이 크기만 보낸다.
+_RECENT_DOCUMENT_PAGE_SIZE = 5
+
+
+def _sidebar_recent_documents(data: dict[str, Any]) -> bool:
+    if any(data.get(key) for key in ("database_slug", "database_id", "view_id", "workspace_id")):
+        return False
+    if str(data.get("q") or "").strip() or data.get("filters") or data.get("sorts"):
+        return False
+    page = int(data.get("page") or 1)
+    page_size = int(data.get("page_size") or 20)
+    return page == 1 and page_size == _RECENT_DOCUMENT_PAGE_SIZE
+
+
 def query_records(user, data: dict[str, Any]) -> dict[str, Any]:
     page = int(data.get("page") or 1)
     page_size = int(data.get("page_size") or 20)
@@ -2289,6 +2303,8 @@ def query_records(user, data: dict[str, Any]) -> dict[str, Any]:
         databases = databases.filter(workspace_id=int(data["workspace_id"]))
 
     qs = Record.objects.filter(database__in=databases).select_related("database")
+    if _sidebar_recent_documents(data):
+        qs = qs.filter(created_by_id=user.id)
     keyword = (data.get("q") or "").strip()
     if keyword:
         value_ids = PropertyValue.objects.filter(

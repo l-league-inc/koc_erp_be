@@ -1,8 +1,31 @@
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
+from ninja.errors import HttpError
 
 from mail import crypto
 from mail.models import UserMailAccount
+from mail.service import verify_stored_account
+
+
+@admin.action(description="선택한 계정 연결 확인")
+def verify_selected_accounts(modeladmin, request, queryset):
+    ok = 0
+    failed: list[str] = []
+    for account in queryset:
+        try:
+            verify_stored_account(account)
+        except HttpError as exc:
+            failed.append(f"{account.username}: {exc.message}")
+            continue
+        ok += 1
+    if ok:
+        modeladmin.message_user(request, f"{ok}건 연결을 확인했습니다.", messages.SUCCESS)
+    if failed:
+        modeladmin.message_user(
+            request,
+            "연결에 실패했습니다. " + " ".join(failed),
+            messages.ERROR,
+        )
 
 
 class UserMailAccountForm(forms.ModelForm):
@@ -50,6 +73,7 @@ class UserMailAccountAdmin(admin.ModelAdmin):
     )
     list_filter = ("provider", "is_verified")
     search_fields = ("username", "user__email")
+    actions = [verify_selected_accounts]
     fields = (
         "user",
         "provider",

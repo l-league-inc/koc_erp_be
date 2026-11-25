@@ -66,6 +66,22 @@ def _credentials(account: UserMailAccount) -> tuple[str, str]:
     return account.username, crypto.decrypt_secret(account.password_encrypted)
 
 
+def verify_stored_account(account: UserMailAccount) -> None:
+    """저장된 앱 비밀번호로 Daum 연결을 확인하고 결과를 계정에 남깁니다."""
+    try:
+        username, password = _credentials(account)
+        daum.test_connection(username, password)
+    except HttpError as exc:
+        account.is_verified = False
+        account.last_error = str(exc.message)
+        account.save(update_fields=["is_verified", "last_error", "updated_at"])
+        raise
+    account.is_verified = True
+    account.last_verified_at = timezone.now()
+    account.last_error = ""
+    account.save(update_fields=["is_verified", "last_verified_at", "last_error", "updated_at"])
+
+
 @transaction.atomic
 def upsert_account(user, username: str, app_password: str) -> dict[str, Any]:
     name = (username or "").strip()

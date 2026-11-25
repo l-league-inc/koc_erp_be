@@ -1,10 +1,14 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from ninja.errors import HttpError
 
 from mail.admin import UserMailAccountForm
-from mail.crypto import decrypt_secret
+from mail.crypto import decrypt_secret, encrypt_secret
 from mail.models import UserMailAccount
+from mail.service import verify_stored_account
 
 User = get_user_model()
 
@@ -121,3 +125,62 @@ class MailAdminViewTests(TestCase):
         self.assertEqual(account.username, "renamed")
         self.assertEqual(account.password_encrypted, original)
         self.assertEqual(decrypt_secret(account.password_encrypted), "plain-app-password")
+
+
+class MailVerifyActionTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            email="verify-owner@example.com",
+            password="password1234!",
+            status=User.UserStatusChoice.ACTIVE,
+        )
+        self.account = UserMailAccount.objects.create(
+            user=self.owner,
+            provider=UserMailAccount.Provider.DAUM,
+            username="daumid",
+            password_encrypted=encrypt_secret("plain-app-password"),
+        )
+
+    def test_verify_marks_account_when_connection_succeeds(self):
+        with patch("mail.service.daum.test_connection") as mocked:
+            verify_stored_account(self.account)
+        mocked.assert_called_once_with("daumid", "plain-app-password")
+        self.account.refresh_from_db()
+        self.assertTrue(self.account.is_verified)
+        self.assertIsNotNone(self.account.last_verified_at)
+        self.assertEqual(self.account.last_error, "")
+        self.assertNotIn("plain-app-password", self.account.password_encrypted)
+
+    def test_verify_records_failure_without_plaintext(self):
+        with patch(
+            "mail.service.daum.test_connection",
+            side_effect=HttpError(400, "메일 서버 로그인이 실패했습니다."),
+        ):
+            with self.assertRaises(HttpError):
+                verify_stored_account(self.account)
+        self.account.refresh_from_db()
+        self.assertFalse(self.account.is_verified)
+        self.assertEqual(self.account.last_error, "메일 서버 로그인이 실패했습니다.")
+        self.assertNotIn("plain-app-password", self.account.last_error)
+
+    def test_admin_action_verifies_selected_account(self):
+        admin = User.objects.create_superuser(
+            email="verify-admin@example.com",
+            password="password1234!",
+            status=User.UserStatusChoice.ACTIVE,
+        )
+        self.client.force_login(admin)
+        with patch("mail.service.daum.test_connection"):
+            response = self.client.post(
+                reverse("admin:mail_usermailaccount_changelist"),
+                {
+                    "action": "verify_selected_accounts",
+                    "_selected_action": [self.account.id],
+                },
+                follow=True,
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "1건 연결을 확인했습니다.")
+        self.account.refresh_from_db()
+        self.assertTrue(self.account.is_verified)
+        self.assertNotIn("plain-app-password", response.content.decode())

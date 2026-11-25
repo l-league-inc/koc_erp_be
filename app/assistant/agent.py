@@ -17,7 +17,7 @@ from estimate.compose import draft_from_payload
 from estimate.errors import EstimateError
 from estimate.schema import EstimateDraft
 from estimate.service import document_payload
-from workspace.models import Property, RecordActivity
+from workspace.models import Property, Record, RecordActivity
 from document.utils import get_file_detail, search_files
 from mail import service as mail_service
 from workspace.utils import (
@@ -33,6 +33,7 @@ from workspace.utils import (
 )
 
 _MAX_ROUNDS = 8
+_IMMEDIATE_RECORD_SLUGS = frozenset({"attendance"})
 _TOOLS = [
     {
         "type": "function",
@@ -83,7 +84,10 @@ _TOOLS = [
         "type": "function",
         "function": {
             "name": "propose_create_record",
-            "description": "레코드 생성 초안을 만듭니다. 사용자가 확정하기 전에는 저장하지 않습니다.",
+            "description": (
+                "레코드 생성 초안을 만듭니다. 사용자가 확정하기 전에는 저장하지 않습니다. "
+                "database_slug가 attendance이면 초안 없이 바로 저장하고 confirmed로 돌려줍니다."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -101,7 +105,10 @@ _TOOLS = [
         "type": "function",
         "function": {
             "name": "propose_update_record",
-            "description": "레코드 수정 초안을 만듭니다. 사용자가 확정하기 전에는 저장하지 않습니다.",
+            "description": (
+                "레코드 수정 초안을 만듭니다. 사용자가 확정하기 전에는 저장하지 않습니다. "
+                "출근(attendance) 레코드는 바로 저장하고 confirmed로 돌려줍니다."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -555,6 +562,29 @@ def _confirm_notice(
     return "확정되어 반영되었습니다. " + ", ".join(parts) + "."
 
 
+def _immediate_saved_notice(action_ids: list[int]) -> str:
+    if not action_ids:
+        return ""
+    records: list[dict[str, Any]] = []
+    actions = ProposedAction.objects.filter(id__in=action_ids).order_by("id")
+    for action in actions:
+        payload = action.payload or {}
+        if payload.get("database_slug") not in _IMMEDIATE_RECORD_SLUGS:
+            continue
+        if action.status != ProposedAction.Status.CONFIRMED:
+            continue
+        record_id = (action.result or {}).get("record_id")
+        if not record_id:
+            continue
+        title = str(payload.get("title") or "")
+        if not title:
+            title = Record.objects.filter(id=record_id).values_list("title", flat=True).first() or ""
+        records.append({"record_id": record_id, "title": title})
+    if not records:
+        return ""
+    return _confirm_notice(records, [], [], [])
+
+
 def _system_prompt(session: AgentSession, user) -> str:
     scope = session.database_slug or "전체"
     index = skillbook.active_index(session.workspace_id)
@@ -576,6 +606,8 @@ def _system_prompt(session: AgentSession, user) -> str:
         "사용자 문장이 설명과 맞으면 view_skill로 전문을 읽고 그 절차를 따릅니다. "
         "레코드나 스킬을 만들거나 고칠 때는 propose 도구만 사용합니다. "
         "pending 초안은 아직 반영 전입니다. "
+        "출근(attendance) 생성·수정은 propose 직후 서버가 저장하고 confirmed와 record_id를 돌려줍니다. "
+        "그 응답을 보면 이미 반영된 것이니 확정 전이라거나 반영할 수 없다고 말하지 않습니다. "
         "confirmed로 적힌 항목은 이미 반영된 사실이니 그 내용을 다시 propose하지 않습니다. "
         "회사 밖 사실(정부지원사업, 공고, 뉴스, 법령)은 web_search로 확인하고 출처 URL을 함께 안내합니다. "
         "검색하지 않은 내용을 지어내지 않습니다. "
@@ -636,11 +668,13 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
         if not isinstance(values, dict) or not isinstance(blocks, list):
             raise HttpError(400, "값 형식이 올바르지 않습니다.")
         values = _prepare_values(database, values)
-        action = ProposedAction.objects.create(
-            session=session,
-            kind=ProposedAction.Kind.CREATE_RECORD,
-            payload={"database_slug": slug, "title": title, "values": values, "blocks": blocks},
-        )
+        with transaction.atomic():
+            action = ProposedAction.objects.create(
+                session=session,
+                kind=ProposedAction.Kind.CREATE_RECORD,
+                payload={"database_slug": slug, "title": title, "values": values, "blocks": blocks},
+            )
+            _confirm_immediate_record(user, session, action)
         created.append(action.id)
         return serialize_action(action)
     if name == "propose_update_record":
@@ -649,18 +683,23 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
             raise HttpError(404, "레코드를 찾을 수 없습니다.")
         if session.database_slug and record.database.slug != session.database_slug:
             raise HttpError(400, "이 대화는 선택한 영역만 다룹니다.")
-        payload: dict[str, Any] = {"record_id": record.id}
+        payload: dict[str, Any] = {
+            "record_id": record.id,
+            "database_slug": record.database.slug,
+        }
         if arguments.get("title") is not None:
             payload["title"] = str(arguments["title"])
         if arguments.get("values") is not None:
             if not isinstance(arguments["values"], dict):
                 raise HttpError(400, "값은 객체여야 합니다.")
             payload["values"] = _prepare_values(record.database, arguments["values"])
-        action = ProposedAction.objects.create(
-            session=session,
-            kind=ProposedAction.Kind.UPDATE_RECORD,
-            payload=payload,
-        )
+        with transaction.atomic():
+            action = ProposedAction.objects.create(
+                session=session,
+                kind=ProposedAction.Kind.UPDATE_RECORD,
+                payload=payload,
+            )
+            _confirm_immediate_record(user, session, action)
         created.append(action.id)
         return serialize_action(action)
     if name == "list_skills":
@@ -812,6 +851,9 @@ def send_message(user, session_id: int, content: str, model: str = "") -> dict[s
             )
     else:
         answer = "요청을 마치지 못했습니다. 다시 말해 주세요."
+    saved_notice = _immediate_saved_notice(created)
+    if saved_notice:
+        answer = saved_notice
     message = AgentMessage.objects.create(
         session=session,
         role=AgentMessage.Role.ASSISTANT,
@@ -823,6 +865,92 @@ def send_message(user, session_id: int, content: str, model: str = "") -> dict[s
         "message": serialize_message(message),
         "proposed_actions": [serialize_action(action) for action in actions],
     }
+
+
+def _apply_proposed_action(user, session: AgentSession, action: ProposedAction) -> tuple[str, dict[str, Any]]:
+    payload = action.payload or {}
+    if action.kind == ProposedAction.Kind.CREATE_RECORD:
+        database = _database(user, session.workspace_id, payload["database_slug"])
+        saved = create_record(
+            user,
+            database.id,
+            {
+                "title": payload.get("title"),
+                "values": payload.get("values") or {},
+                "blocks": payload.get("blocks") or [],
+            },
+            RecordActivity.Source.AGENT,
+        )
+        action.result = {"record_id": saved["id"]}
+        bucket = "records"
+        item = {
+            "action_id": action.id,
+            "record_id": saved["id"],
+            "database_id": saved["database_id"],
+            "title": saved["title"],
+        }
+    elif action.kind == ProposedAction.Kind.UPDATE_RECORD:
+        saved = update_record(
+            user,
+            int(payload["record_id"]),
+            {
+                "title": payload.get("title"),
+                "values": payload.get("values"),
+            },
+            RecordActivity.Source.AGENT,
+        )
+        action.result = {"record_id": saved["id"]}
+        bucket = "records"
+        item = {
+            "action_id": action.id,
+            "record_id": saved["id"],
+            "database_id": saved["database_id"],
+            "title": saved["title"],
+        }
+    elif action.kind in {
+        ProposedAction.Kind.CREATE_SKILL,
+        ProposedAction.Kind.UPDATE_SKILL,
+    }:
+        saved = skillbook.apply_skill_proposal(user, session.workspace_id, action.kind, payload)
+        action.result = {"skill_id": saved["id"], "name": saved["name"]}
+        bucket = "skills"
+        item = {"action_id": action.id, "skill_id": saved["id"], "name": saved["name"]}
+    elif action.kind == ProposedAction.Kind.CREATE_ESTIMATE:
+        try:
+            document = document_payload(EstimateDraft.model_validate(payload))
+        except EstimateError as exc:
+            raise HttpError(400, str(exc)) from None
+        action.result = document
+        bucket = "estimates"
+        item = {"action_id": action.id, **document}
+    elif action.kind == ProposedAction.Kind.SEND_MAIL:
+        sent = mail_service.send_message(
+            user,
+            to=list(payload.get("to") or []),
+            subject=str(payload.get("subject") or ""),
+            body=str(payload.get("body") or ""),
+            cc=list(payload.get("cc") or []),
+            bcc=list(payload.get("bcc") or []),
+        )
+        action.result = sent
+        bucket = "mails"
+        item = {"action_id": action.id, **sent}
+    else:
+        raise HttpError(400, "지원하지 않는 초안입니다.")
+    action.status = ProposedAction.Status.CONFIRMED
+    action.save(update_fields=["status", "result", "updated_at"])
+    return bucket, item
+
+
+def _confirm_immediate_record(user, session: AgentSession, action: ProposedAction) -> None:
+    if action.kind not in {
+        ProposedAction.Kind.CREATE_RECORD,
+        ProposedAction.Kind.UPDATE_RECORD,
+    }:
+        return
+    if (action.payload or {}).get("database_slug") not in _IMMEDIATE_RECORD_SLUGS:
+        return
+    _apply_proposed_action(user, session, action)
 
 
 @transaction.atomic
@@ -843,79 +971,15 @@ def confirm_actions(user, session_id: int, action_ids: list[int]) -> dict[str, A
     skills = []
     mails = []
     estimates = []
+    buckets = {
+        "records": records,
+        "skills": skills,
+        "mails": mails,
+        "estimates": estimates,
+    }
     for action in actions:
-        payload = action.payload or {}
-        if action.kind == ProposedAction.Kind.CREATE_RECORD:
-            database = _database(user, session.workspace_id, payload["database_slug"])
-            saved = create_record(
-                user,
-                database.id,
-                {
-                    "title": payload.get("title"),
-                    "values": payload.get("values") or {},
-                    "blocks": payload.get("blocks") or [],
-                },
-                RecordActivity.Source.AGENT,
-            )
-            action.result = {"record_id": saved["id"]}
-            records.append(
-                {
-                    "action_id": action.id,
-                    "record_id": saved["id"],
-                    "database_id": saved["database_id"],
-                    "title": saved["title"],
-                }
-            )
-        elif action.kind == ProposedAction.Kind.UPDATE_RECORD:
-            saved = update_record(
-                user,
-                int(payload["record_id"]),
-                {
-                    "title": payload.get("title"),
-                    "values": payload.get("values"),
-                },
-                RecordActivity.Source.AGENT,
-            )
-            action.result = {"record_id": saved["id"]}
-            records.append(
-                {
-                    "action_id": action.id,
-                    "record_id": saved["id"],
-                    "database_id": saved["database_id"],
-                    "title": saved["title"],
-                }
-            )
-        elif action.kind in {
-            ProposedAction.Kind.CREATE_SKILL,
-            ProposedAction.Kind.UPDATE_SKILL,
-        }:
-            saved = skillbook.apply_skill_proposal(user, session.workspace_id, action.kind, payload)
-            action.result = {"skill_id": saved["id"], "name": saved["name"]}
-            skills.append(
-                {"action_id": action.id, "skill_id": saved["id"], "name": saved["name"]}
-            )
-        elif action.kind == ProposedAction.Kind.CREATE_ESTIMATE:
-            try:
-                document = document_payload(EstimateDraft.model_validate(payload))
-            except EstimateError as exc:
-                raise HttpError(400, str(exc)) from None
-            action.result = document
-            estimates.append({"action_id": action.id, **document})
-        elif action.kind == ProposedAction.Kind.SEND_MAIL:
-            sent = mail_service.send_message(
-                user,
-                to=list(payload.get("to") or []),
-                subject=str(payload.get("subject") or ""),
-                body=str(payload.get("body") or ""),
-                cc=list(payload.get("cc") or []),
-                bcc=list(payload.get("bcc") or []),
-            )
-            action.result = sent
-            mails.append({"action_id": action.id, **sent})
-        else:
-            raise HttpError(400, "지원하지 않는 초안입니다.")
-        action.status = ProposedAction.Status.CONFIRMED
-        action.save(update_fields=["status", "result", "updated_at"])
+        bucket, item = _apply_proposed_action(user, session, action)
+        buckets[bucket].append(item)
     notice = AgentMessage.objects.create(
         session=session,
         role=AgentMessage.Role.ASSISTANT,

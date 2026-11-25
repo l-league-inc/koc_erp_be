@@ -219,7 +219,13 @@ class AgentApiTests(TestCase):
 
     async def test_attendance_skill_is_loaded_before_draft(self):
         workspace_id = await self._workspace_id()
-        await sync_to_async(self._ensure_database)(workspace_id, "attendance", "근무 기록")
+        database = await sync_to_async(self._ensure_database)(workspace_id, "attendance", "근무 기록")
+        await sync_to_async(Property.objects.create)(
+            database=database,
+            name="근무기록명",
+            slug="title",
+            type=Property.Type.TITLE,
+        )
         created = await self.client.post(
             "/session",
             json={"workspace_id": workspace_id},
@@ -256,12 +262,14 @@ class AgentApiTests(TestCase):
                             "arguments": {
                                 "database_slug": "attendance",
                                 "title": "2026-11-01 출근",
-                                "values": {"work_date": "2026-11-01", "employee": [1]},
+                                "values": {},
                             },
                         }
                     ],
                 }
-            return {"content": "출근 초안을 만들었습니다.", "tool_calls": []}
+            self.assertIn('"status": "confirmed"', tool_messages[-1]["content"])
+            self.assertIn("record_id", tool_messages[-1]["content"])
+            return {"content": "확정 전이라 반영할 수 없습니다.", "tool_calls": []}
 
         with patch("assistant.agent.llm.complete", _fake_attendance):
             message = await self.client.post(
@@ -270,10 +278,16 @@ class AgentApiTests(TestCase):
                 headers=self.headers(),
             )
         self.assertEqual(message.status_code, 200, message.json())
-        self.assertEqual(message.json()["proposed_actions"][0]["kind"], "create_record")
+        action = message.json()["proposed_actions"][0]
+        self.assertEqual(action["kind"], "create_record")
+        self.assertEqual(action["payload"]["database_slug"], "attendance")
+        self.assertEqual(action["status"], "confirmed")
+        self.assertIsInstance(action["result"]["record_id"], int)
+        self.assertIn("확정되어 반영되었습니다", message.json()["message"]["content"])
+        self.assertNotIn("확정 전", message.json()["message"]["content"])
         self.assertEqual(
-            message.json()["proposed_actions"][0]["payload"]["database_slug"],
-            "attendance",
+            await sync_to_async(Record.objects.filter(title="2026-11-01 출근").count)(),
+            1,
         )
 
     async def test_scoped_session_can_read_related_databases(self):

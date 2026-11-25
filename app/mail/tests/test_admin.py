@@ -8,6 +8,7 @@ from ninja.errors import HttpError
 from mail.admin import UserMailAccountForm
 from mail.crypto import decrypt_secret, encrypt_secret
 from mail.models import UserMailAccount
+from mail.servers import DAUM
 from mail.service import verify_stored_account
 
 User = get_user_model()
@@ -144,7 +145,7 @@ class MailVerifyActionTests(TestCase):
     def test_verify_marks_account_when_connection_succeeds(self):
         with patch("mail.service.daum.test_connection") as mocked:
             verify_stored_account(self.account)
-        mocked.assert_called_once_with("daumid", "plain-app-password")
+        mocked.assert_called_once_with("daumid", "plain-app-password", DAUM)
         self.account.refresh_from_db()
         self.assertTrue(self.account.is_verified)
         self.assertIsNotNone(self.account.last_verified_at)

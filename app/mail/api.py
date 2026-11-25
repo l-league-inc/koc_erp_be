@@ -18,7 +18,7 @@ router = Router(tags=["Mail"])
 @router.get(
     "/account",
     summary="[C] 메일 계정 조회",
-    description="연결된 Daum 메일 계정 상태를 조회합니다. 앱 비밀번호는 반환하지 않습니다.",
+    description="연결된 Daum 또는 Naver 메일 계정 상태를 조회합니다. 앱 비밀번호는 반환하지 않습니다.",
     response=MailAccountResponseSchema,
     auth=jwt_auth,
 )
@@ -29,7 +29,7 @@ async def get_account_api(request):
 @router.put(
     "/account",
     summary="[C] 메일 계정 등록",
-    description="Daum 메일 아이디와 앱 비밀번호를 저장하고 IMAP/SMTP 연결을 확인합니다.",
+    description="Daum 또는 Naver 메일 아이디와 앱 비밀번호를 저장하고 IMAP/SMTP 연결을 확인합니다. provider는 daum 또는 naver이고, 없으면 daum입니다.",
     response=MailAccountResponseSchema,
     auth=jwt_auth,
 )
@@ -38,6 +38,7 @@ async def upsert_account_api(request, payload: MailAccountUpsertSchema):
         request.auth,
         payload.username,
         payload.app_password,
+        payload.provider,
     )
 
 

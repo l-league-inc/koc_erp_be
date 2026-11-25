@@ -1,18 +1,18 @@
 ---
-title: Daum 메일 연동
+title: 메일 연동
 audience: frontend
 ---
 
-# Daum 메일 연동
+# 메일 연동
 
-유저마다 Daum 메일 아이디와 앱 비밀번호를 등록하면 IMAP으로 메일을 읽고 SMTP로 보냅니다. 서버·포트는 고정입니다. 아이디와 앱 비밀번호만 받습니다. 앱 비밀번호는 AES로 암호화해 저장하고, API 응답에는 넣지 않습니다. 인증은 기존 JWT입니다.
+유저마다 Daum 또는 Naver 메일 아이디와 앱 비밀번호를 등록하면 IMAP으로 메일을 읽고 SMTP로 보냅니다. 등록할 때 `provider`로 `daum` 또는 `naver`를 고릅니다. 비우면 `daum`입니다. 계정당 제공자는 하나이고, 다시 등록하면 그 제공자로 바뀝니다. 앱 비밀번호는 AES로 암호화해 저장하고, API 응답에는 넣지 않습니다. 인증은 기존 JWT입니다.
 
-호스트는 `imap.daum.net:993`(SSL), `smtp.daum.net:465`(SSL)입니다.
+Daum은 `imap.daum.net:993`(SSL), `smtp.daum.net:465`(SSL)입니다. Naver는 `imap.naver.com:993`(SSL), `smtp.naver.com:587`(TLS)입니다. Naver에서 TLS를 쓸 수 없으면 `smtp.naver.com:465`(SSL)로 연결합니다.
 
 ## 유저 플로우
 
 1. 설정 화면에서 `GET /api/v1/mail/account`로 연결 여부를 그립니다. `configured`가 false면 등록 폼을 보여 줍니다.
-2. 아이디와 앱 비밀번호를 `PUT /api/v1/mail/account`로 보냅니다. 서버가 IMAP·SMTP 연결을 확인한 뒤 저장합니다. 실패하면 400/502와 안내 문구입니다.
+2. 제공자, 아이디, 앱 비밀번호를 `PUT /api/v1/mail/account`로 보냅니다. 서버가 IMAP·SMTP 연결을 확인한 뒤 저장합니다. 실패하면 400/502와 안내 문구입니다.
 3. 목록은 `GET /api/v1/mail/messages`입니다. 상세는 `GET /api/v1/mail/messages/{uid}`입니다.
 4. 바로 보내려면 `POST /api/v1/mail/send`입니다.
 5. 연결 해제는 `DELETE /api/v1/mail/account`입니다. 204면 설정 화면을 비웁니다.
@@ -23,7 +23,7 @@ audience: frontend
 기본 경로는 `/api/v1/mail`입니다.
 
 - `GET /account` 연결 상태. 비밀번호 없음
-- `PUT /account` 아이디·앱 비밀번호 저장과 연결 확인
+- `PUT /account` 제공자·아이디·앱 비밀번호 저장과 연결 확인. `provider`는 `daum` 또는 `naver`
 - `DELETE /account` 연결 해제. 204
 - `GET /messages` 목록. 쿼리 `folder`(기본 `INBOX`), `limit`(기본 20, 최대 50), `unread_only`
 - `GET /messages/{uid}` 본문 포함. 쿼리 `folder`
@@ -35,19 +35,20 @@ audience: frontend
 
 ```json
 {
+  "provider": "naver",
   "username": "example",
-  "app_password": "daum-app-password"
+  "app_password": "app-password"
 }
 ```
 
-`username`은 Daum 로그인 아이디 또는 `@daum.net` / `@hanmail.net` 전체 주소입니다.
+`provider`를 빼면 `daum`입니다. `gmail`처럼 모르는 값은 400입니다. `username`은 로그인 아이디 또는 전체 주소입니다. Daum은 `@daum.net` / `@hanmail.net`, Naver는 `@naver.com`입니다. 아이디만 있으면 발신 주소는 Daum `@daum.net`, Naver `@naver.com`입니다.
 
 응답:
 
 ```json
 {
   "configured": true,
-  "provider": "daum",
+  "provider": "naver",
   "username": "example",
   "username_masked": "ex***",
   "is_verified": true,
@@ -94,7 +95,7 @@ audience: frontend
 
 ```json
 {
-  "sender": "example@daum.net",
+  "sender": "example@naver.com",
   "to": ["client@example.com"],
   "cc": [],
   "bcc": [],
@@ -121,6 +122,7 @@ audience: frontend
 
 ## 구현 체크리스트
 
+- 설정 화면에 `daum`과 `naver` 중 하나를 고르게 한다. 응답 `provider`로 현재 연결을 표시한다.
 - 설정 화면에 비밀번호를 다시 보여 주지 않는다. `configured`와 `username_masked`만 쓴다.
 - `PUT` 실패 문구를 그대로 보여 준다.
 - 업무 대화에서 `send_mail` 초안이 `pending`일 때만 확정 버튼을 띄운다. 확정 전에는 보냈다고 표시하지 않는다.
@@ -128,7 +130,7 @@ audience: frontend
 
 ## 비범위
 
-- Gmail 등 다른 제공자
+- Gmail 등 Daum·Naver 외 제공자
 - 첨부 업로드·다운로드
 - 폴더 생성·이동 UI
 - 메일 HTML 정밀 렌더

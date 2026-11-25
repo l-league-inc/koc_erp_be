@@ -1,4 +1,4 @@
-"""Daum IMAP/SMTP 클라이언트."""
+"""Daum·Naver IMAP/SMTP 클라이언트."""
 
 from __future__ import annotations
 
@@ -14,12 +14,11 @@ from typing import Any
 
 from ninja.errors import HttpError
 
-IMAP_HOST = "imap.daum.net"
-IMAP_PORT = 993
-SMTP_HOST = "smtp.daum.net"
-SMTP_PORT = 465
+from mail.servers import MailServer
+
 _SNIPPET_LIMIT = 200
 _BODY_LIMIT = 20000
+_TIMEOUT = 30
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -82,9 +81,14 @@ def _parse_date(value: str | None) -> str | None:
         return value
 
 
-def _imap_login(username: str, password: str) -> imaplib.IMAP4_SSL:
+def _imap_login(username: str, password: str, server: MailServer) -> imaplib.IMAP4_SSL:
     try:
-        client = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, ssl_context=_ssl_context())
+        client = imaplib.IMAP4_SSL(
+            server.imap_host,
+            server.imap_port,
+            ssl_context=_ssl_context(),
+            timeout=_TIMEOUT,
+        )
         client.login(username, password)
         return client
     except imaplib.IMAP4.error as exc:
@@ -93,9 +97,21 @@ def _imap_login(username: str, password: str) -> imaplib.IMAP4_SSL:
         raise HttpError(502, "메일 서버에 연결할 수 없습니다.") from exc
 
 
-def _smtp_login(username: str, password: str) -> smtplib.SMTP_SSL:
+def _close_smtp(client: smtplib.SMTP | None) -> None:
+    if client is None:
+        return
     try:
-        client = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=_ssl_context())
+        client.quit()
+    except Exception:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
+def _smtp_ssl_login(username: str, password: str, host: str, port: int) -> smtplib.SMTP_SSL:
+    try:
+        client = smtplib.SMTP_SSL(host, port, context=_ssl_context(), timeout=_TIMEOUT)
         client.login(username, password)
         return client
     except smtplib.SMTPAuthenticationError as exc:
@@ -104,13 +120,39 @@ def _smtp_login(username: str, password: str) -> smtplib.SMTP_SSL:
         raise HttpError(502, "메일 서버에 연결할 수 없습니다.") from exc
 
 
-def test_connection(username: str, password: str) -> None:
-    imap_client = _imap_login(username, password)
+def _smtp_login(username: str, password: str, server: MailServer) -> smtplib.SMTP:
+    if server.smtp_mode == "ssl":
+        return _smtp_ssl_login(username, password, server.smtp_host, server.smtp_port)
+    client: smtplib.SMTP | None = None
+    try:
+        client = smtplib.SMTP(server.smtp_host, server.smtp_port, timeout=_TIMEOUT)
+        client.ehlo()
+        if not client.has_extn("starttls"):
+            raise OSError("STARTTLS unavailable")
+        client.starttls(context=_ssl_context())
+        client.ehlo()
+        client.login(username, password)
+        return client
+    except smtplib.SMTPAuthenticationError as exc:
+        _close_smtp(client)
+        raise HttpError(400, "메일 서버 로그인이 실패했습니다.") from exc
+    except HttpError:
+        _close_smtp(client)
+        raise
+    except (smtplib.SMTPException, OSError, ssl.SSLError) as exc:
+        _close_smtp(client)
+        if server.smtp_ssl_port is None:
+            raise HttpError(502, "메일 서버에 연결할 수 없습니다.") from exc
+        return _smtp_ssl_login(username, password, server.smtp_host, server.smtp_ssl_port)
+
+
+def test_connection(username: str, password: str, server: MailServer) -> None:
+    imap_client = _imap_login(username, password, server)
     try:
         imap_client.logout()
     except Exception:
         pass
-    smtp_client = _smtp_login(username, password)
+    smtp_client = _smtp_login(username, password, server)
     try:
         smtp_client.quit()
     except Exception:
@@ -120,13 +162,14 @@ def test_connection(username: str, password: str) -> None:
 def list_messages(
     username: str,
     password: str,
+    server: MailServer,
     *,
     folder: str = "INBOX",
     limit: int = 20,
     unread_only: bool = False,
 ) -> list[dict[str, Any]]:
     limit = max(1, min(int(limit or 20), 50))
-    client = _imap_login(username, password)
+    client = _imap_login(username, password, server)
     try:
         status, _ = client.select(folder, readonly=True)
         if status != "OK":
@@ -204,12 +247,13 @@ def get_message(
     username: str,
     password: str,
     uid: str,
+    server: MailServer,
     *,
     folder: str = "INBOX",
 ) -> dict[str, Any]:
     if not uid or not str(uid).isdigit():
         raise HttpError(400, "메일 uid가 올바르지 않습니다.")
-    client = _imap_login(username, password)
+    client = _imap_login(username, password, server)
     try:
         status, _ = client.select(folder, readonly=True)
         if status != "OK":
@@ -260,6 +304,7 @@ def get_message(
 def send_message(
     username: str,
     password: str,
+    server: MailServer,
     *,
     to: list[str],
     subject: str,
@@ -277,7 +322,7 @@ def send_message(
     if not subject_text:
         raise HttpError(400, "제목이 필요합니다.")
     body_text = body or ""
-    from_addr = username if "@" in username else f"{username}@daum.net"
+    from_addr = username if "@" in username else f"{username}@{server.default_domain}"
     message = EmailMessage()
     message["From"] = from_addr
     message["To"] = ", ".join(recipients)
@@ -289,7 +334,7 @@ def send_message(
         maintype, subtype = mime.split("/", 1)
         message.add_attachment(content, maintype=maintype, subtype=subtype, filename=filename)
     all_recipients = recipients + cc_list + bcc_list
-    client = _smtp_login(username, password)
+    client = _smtp_login(username, password, server)
     try:
         client.send_message(message, from_addr=from_addr, to_addrs=all_recipients)
     except smtplib.SMTPException as exc:

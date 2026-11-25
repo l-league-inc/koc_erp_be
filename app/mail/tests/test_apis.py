@@ -8,6 +8,7 @@ from ninja.testing import TestAsyncClient
 from mail.api import router
 from mail.crypto import decrypt_secret
 from mail.models import UserMailAccount
+from mail.servers import DAUM, NAVER
 from user.utils import get_access_token
 
 User = get_user_model()
@@ -40,10 +41,11 @@ class MailApiTests(TestCase):
                 headers=self.headers(),
             )
         self.assertEqual(saved.status_code, 200, saved.json())
-        mocked.assert_called_once_with("daumid", "plain-app-password")
+        mocked.assert_called_once_with("daumid", "plain-app-password", DAUM)
         body = saved.json()
         self.assertTrue(body["configured"])
         self.assertTrue(body["is_verified"])
+        self.assertEqual(body["provider"], "daum")
         self.assertEqual(body["username"], "daumid")
         self.assertNotIn("plain-app-password", str(body))
         self.assertNotIn("app_password", body)
@@ -139,3 +141,31 @@ class MailApiTests(TestCase):
         deleted = await self.client.delete("/account", headers=self.headers())
         self.assertEqual(deleted.status_code, 204)
         self.assertFalse(await UserMailAccount.objects.filter(user=self.user).aexists())
+
+    async def test_naver_account_uses_naver_server(self):
+        with patch("mail.service.daum.test_connection") as mocked:
+            saved = await self.client.put(
+                "/account",
+                json={
+                    "username": "naverid",
+                    "app_password": "plain-app-password",
+                    "provider": "naver",
+                },
+                headers=self.headers(),
+            )
+        self.assertEqual(saved.status_code, 200, saved.json())
+        mocked.assert_called_once_with("naverid", "plain-app-password", NAVER)
+        self.assertEqual(saved.json()["provider"], "naver")
+        account = await UserMailAccount.objects.aget(user=self.user)
+        self.assertEqual(account.provider, "naver")
+        self.assertEqual(decrypt_secret(account.password_encrypted), "plain-app-password")
+
+    async def test_unknown_provider_is_rejected(self):
+        with patch("mail.service.daum.test_connection") as mocked:
+            saved = await self.client.put(
+                "/account",
+                json={"username": "user", "app_password": "secret", "provider": "gmail"},
+                headers=self.headers(),
+            )
+        self.assertEqual(saved.status_code, 400)
+        mocked.assert_not_called()

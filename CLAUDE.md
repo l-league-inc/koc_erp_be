@@ -48,5 +48,5 @@ applyTo: "**"
 | [document_frontend.md](../docs/document_frontend.md) | 회사 문서함, 공유·개인 폴더, 색인, 다운로드·메일 이력 |
 | [koc_drive_frontend.md](../docs/koc_drive_frontend.md) | Windows 탐색기 동기화, 플레이스홀더, 충돌 |
 | [voice_frontend.md](../docs/voice_frontend.md) | 음성 등록, 비공개 S3 presigned 업로드·재생 |
-| [mail_frontend.md](../docs/mail_frontend.md) | Daum 메일 계정, IMAP 조회, SMTP 발송, 에이전트·MCP |
+| [mail_frontend.md](../docs/mail_frontend.md) | Daum·Naver 메일 계정, IMAP 조회, SMTP 발송, 에이전트·MCP |
 | [estimate_frontend.md](../docs/estimate_frontend.md) | 견적서 초안, 미리보기, PDF, 선택 메일 |

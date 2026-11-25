@@ -10,6 +10,7 @@ from ninja.errors import HttpError
 
 from mail import crypto, daum
 from mail.models import UserMailAccount
+from mail.servers import MailServer, get_server
 
 
 def _mask_username(username: str) -> str:
@@ -58,7 +59,10 @@ def get_account(user) -> dict[str, Any]:
 def _load_account(user) -> UserMailAccount:
     account = UserMailAccount.objects.filter(user=user).first()
     if account is None:
-        raise HttpError(400, "메일 계정이 연결되어 있지 않습니다. 설정에서 Daum 메일 아이디와 앱 비밀번호를 등록하세요.")
+        raise HttpError(
+            400,
+            "메일 계정이 연결되어 있지 않습니다. 설정에서 Daum 또는 Naver 메일 아이디와 앱 비밀번호를 등록하세요.",
+        )
     return account
 
 
@@ -66,11 +70,18 @@ def _credentials(account: UserMailAccount) -> tuple[str, str]:
     return account.username, crypto.decrypt_secret(account.password_encrypted)
 
 
+def _server_for(provider: str) -> MailServer:
+    server = get_server(provider)
+    if server is None:
+        raise HttpError(400, "메일 제공자는 daum 또는 naver입니다.")
+    return server
+
+
 def verify_stored_account(account: UserMailAccount) -> None:
-    """저장된 앱 비밀번호로 Daum 연결을 확인하고 결과를 계정에 남깁니다."""
+    """저장된 앱 비밀번호로 메일 연결을 확인하고 결과를 계정에 남깁니다."""
     try:
         username, password = _credentials(account)
-        daum.test_connection(username, password)
+        daum.test_connection(username, password, _server_for(account.provider))
     except HttpError as exc:
         account.is_verified = False
         account.last_error = str(exc.message)
@@ -83,15 +94,16 @@ def verify_stored_account(account: UserMailAccount) -> None:
 
 
 @transaction.atomic
-def upsert_account(user, username: str, app_password: str) -> dict[str, Any]:
+def upsert_account(user, username: str, app_password: str, provider: str = "daum") -> dict[str, Any]:
     name = (username or "").strip()
     password = (app_password or "").strip()
+    server = _server_for(provider)
     if not name:
         raise HttpError(400, "메일 아이디가 필요합니다.")
     if not password:
         raise HttpError(400, "앱 비밀번호가 필요합니다.")
     try:
-        daum.test_connection(name, password)
+        daum.test_connection(name, password, server)
     except HttpError as exc:
         account = UserMailAccount.objects.filter(user=user).first()
         if account is not None:
@@ -108,7 +120,7 @@ def upsert_account(user, username: str, app_password: str) -> dict[str, Any]:
             account = deleted
         else:
             account = UserMailAccount(user=user)
-    account.provider = UserMailAccount.Provider.DAUM
+    account.provider = server.provider
     account.username = name
     account.password_encrypted = encrypted
     account.is_verified = True
@@ -135,11 +147,13 @@ def list_messages(
 ) -> list[dict[str, Any]]:
     account = _load_account(user)
     username, password = _credentials(account)
+    server = _server_for(account.provider)
     folder_name = (folder or "INBOX").strip() or "INBOX"
     try:
         return daum.list_messages(
             username,
             password,
+            server,
             folder=folder_name,
             limit=limit,
             unread_only=unread_only,
@@ -153,9 +167,10 @@ def list_messages(
 def get_message(user, uid: str, *, folder: str = "INBOX") -> dict[str, Any]:
     account = _load_account(user)
     username, password = _credentials(account)
+    server = _server_for(account.provider)
     folder_name = (folder or "INBOX").strip() or "INBOX"
     try:
-        return daum.get_message(username, password, uid, folder=folder_name)
+        return daum.get_message(username, password, uid, server, folder=folder_name)
     except HttpError as exc:
         account.last_error = str(exc.message)
         account.save(update_fields=["last_error", "updated_at"])
@@ -174,10 +189,12 @@ def send_message(
 ) -> dict[str, Any]:
     account = _load_account(user)
     username, password = _credentials(account)
+    server = _server_for(account.provider)
     try:
         return daum.send_message(
             username,
             password,
+            server,
             to=to,
             subject=subject,
             body=body,

@@ -7,6 +7,7 @@ from ninja import Schema
 class MailAccountUpsertSchema(Schema):
     username: str
     app_password: str
+    provider: str = "daum"
 
 
 class MailAccountResponseSchema(Schema):

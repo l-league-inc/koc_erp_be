@@ -20,6 +20,7 @@ from assistant.models import AgentSession, ProposedAction, Skill
 from user.utils import get_access_token
 from workspace.models import Database, Property, Record, RecordActivity, Workspace
 from workspace.seed import seed_koc_workspace
+from workspace.utils import create_record
 
 User = get_user_model()
 
@@ -77,6 +78,31 @@ class AgentApiTests(TestCase):
             type=Property.Type.RELATION,
             config={"database_id": employees.id},
         )
+
+    def _clock_workspace(self, workspace_id: int) -> tuple[Database, Database]:
+        workspace = Workspace.objects.get(id=workspace_id)
+        employees = Database.objects.create(workspace=workspace, name="임직원", slug="employees")
+        Property.objects.create(
+            database=employees, name="이름", slug="title", type=Property.Type.TITLE
+        )
+        Property.objects.create(
+            database=employees, name="사내 이메일", slug="email", type=Property.Type.EMAIL
+        )
+        attendance = Database.objects.create(workspace=workspace, name="근무 기록", slug="attendance")
+        Property.objects.create(
+            database=attendance, name="근무기록명", slug="title", type=Property.Type.TITLE
+        )
+        Property.objects.create(
+            database=attendance, name="근무일", slug="work_date", type=Property.Type.DATE
+        )
+        Property.objects.create(
+            database=attendance,
+            name="임직원",
+            slug="employee",
+            type=Property.Type.RELATION,
+            config={"database_id": employees.id},
+        )
+        return employees, attendance
 
     async def _workspace_id(self) -> int:
         from workspace.api import router as workspace_router
@@ -251,6 +277,8 @@ class AgentApiTests(TestCase):
                 }
             if len(tool_messages) == 1:
                 self.assertIn("propose_create_record", tool_messages[0]["content"])
+                self.assertIn("find_self_employee", tool_messages[0]["content"])
+                self.assertIn("이름을 묻지 않습니다", tool_messages[0]["content"])
                 self.assertIn("employees", tool_messages[0]["content"])
                 self.assertIn("`employee`", tool_messages[0]["content"])
                 return {
@@ -288,6 +316,126 @@ class AgentApiTests(TestCase):
         self.assertEqual(
             await sync_to_async(Record.objects.filter(title="2026-11-01 출근").count)(),
             1,
+        )
+
+    async def _session_id(self, workspace_id: int) -> int:
+        created = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id},
+            headers=self.headers(),
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        return created.json()["id"]
+
+    async def test_clock_in_word_uses_the_account_name(self):
+        self.user.name = "전다운"
+        await sync_to_async(self.user.save)(update_fields=["name"])
+        workspace_id = await self._workspace_id()
+        employees, attendance = await sync_to_async(self._clock_workspace)(workspace_id)
+        person = await sync_to_async(create_record)(
+            self.user,
+            employees.id,
+            {"title": "전다운", "values": {"email": "office@koc.kr"}},
+            RecordActivity.Source.USER,
+        )
+        session_id = await self._session_id(workspace_id)
+
+        def _forbid(messages, tools, model=None):
+            raise AssertionError("출근은 모델 없이 저장되어야 합니다.")
+
+        with patch("assistant.agent.llm.complete", _forbid):
+            message = await self.client.post(
+                f"/session/{session_id}/message",
+                json={"content": "출근"},
+                headers=self.headers(),
+            )
+        self.assertEqual(message.status_code, 200, message.json())
+        self.assertIn("확정되어 반영되었습니다", message.json()["message"]["content"])
+        action = message.json()["proposed_actions"][0]
+        self.assertEqual(action["status"], "confirmed")
+        self.assertEqual(action["payload"]["values"]["employee"], [person["id"]])
+        self.assertTrue(action["payload"]["title"].endswith("출근"))
+        with patch("assistant.agent.llm.complete", _forbid):
+            again = await self.client.post(
+                f"/session/{session_id}/message",
+                json={"content": "출근"},
+                headers=self.headers(),
+            )
+        self.assertEqual(again.status_code, 200, again.json())
+        self.assertIn("이미 있습니다", again.json()["message"]["content"])
+        self.assertEqual(again.json()["proposed_actions"], [])
+        self.assertEqual(
+            await sync_to_async(Record.objects.filter(database_id=attendance.id).count)(),
+            1,
+        )
+
+    async def test_clock_in_word_prefers_the_account_email(self):
+        self.user.name = "전다운"
+        await sync_to_async(self.user.save)(update_fields=["name"])
+        workspace_id = await self._workspace_id()
+        employees, attendance = await sync_to_async(self._clock_workspace)(workspace_id)
+        by_email = await sync_to_async(create_record)(
+            self.user,
+            employees.id,
+            {"title": "김다른", "values": {"email": self.user.email}},
+            RecordActivity.Source.USER,
+        )
+        await sync_to_async(create_record)(
+            self.user,
+            employees.id,
+            {"title": "전다운", "values": {"email": "office@koc.kr"}},
+            RecordActivity.Source.USER,
+        )
+        session_id = await self._session_id(workspace_id)
+
+        def _forbid(messages, tools, model=None):
+            raise AssertionError("출근은 모델 없이 저장되어야 합니다.")
+
+        with patch("assistant.agent.llm.complete", _forbid):
+            message = await self.client.post(
+                f"/session/{session_id}/message",
+                json={"content": "오늘 출근해줘"},
+                headers=self.headers(),
+            )
+        self.assertEqual(message.status_code, 200, message.json())
+        self.assertEqual(
+            message.json()["proposed_actions"][0]["payload"]["values"]["employee"],
+            [by_email["id"]],
+        )
+        self.assertEqual(
+            await sync_to_async(Record.objects.filter(database_id=attendance.id).count)(),
+            1,
+        )
+
+    async def test_clock_in_word_leaves_an_ambiguous_name_to_the_model(self):
+        self.user.name = "전다운"
+        await sync_to_async(self.user.save)(update_fields=["name"])
+        workspace_id = await self._workspace_id()
+        employees, attendance = await sync_to_async(self._clock_workspace)(workspace_id)
+        for email in ("one@koc.kr", "two@koc.kr"):
+            await sync_to_async(create_record)(
+                self.user,
+                employees.id,
+                {"title": "전다운", "values": {"email": email}},
+                RecordActivity.Source.USER,
+            )
+        session_id = await self._session_id(workspace_id)
+
+        def _ask(messages, tools, model=None):
+            return {"content": "같은 이름이 둘입니다.", "tool_calls": []}
+
+        with patch("assistant.agent.llm.complete", _ask):
+            message = await self.client.post(
+                f"/session/{session_id}/message",
+                json={"content": "출근"},
+                headers=self.headers(),
+            )
+        self.assertEqual(message.status_code, 200, message.json())
+        self.assertEqual(message.json()["message"]["content"], "같은 이름이 둘입니다.")
+        self.assertEqual(message.json()["proposed_actions"], [])
+        self.assertEqual(
+            await sync_to_async(Record.objects.filter(database_id=attendance.id).count)(),
+            0,
         )
 
     async def test_scoped_session_can_read_related_databases(self):

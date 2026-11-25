@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -34,12 +35,27 @@ from workspace.utils import (
 
 _MAX_ROUNDS = 8
 _IMMEDIATE_RECORD_SLUGS = frozenset({"attendance"})
+_SELF_CLOCK_IN = re.compile(
+    r"^(?:오늘\s+)?출근(?:\s+(?:등록|체크))?(?:\s*해\s*(?:줘|주세요))?$"
+)
 _TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "list_members",
             "description": "워크스페이스 멤버의 이름과 user_id를 조회합니다.",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_self_employee",
+            "description": (
+                "로그인한 사용자의 임직원 레코드를 찾습니다. "
+                "사내 이메일이 계정 이메일과 같으면 그 행을 쓰고, 없으면 계정 이름과 제목이 같은 행을 씁니다. "
+                "다른 사람을 지목하지 않은 출근은 이 도구로 본인을 정합니다."
+            ),
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         },
     },
@@ -595,7 +611,9 @@ def _system_prompt(session: AgentSession, user) -> str:
         "사용자에게 보이는 문장은 한국어로만 작성합니다. "
         f"워크스페이스 id는 {session.workspace_id}이고 범위는 {scope}입니다. "
         f"오늘 날짜는 {timezone.now().date().isoformat()}이고 "
-        f"사용자 id는 {user.id}이며 이메일은 {user.email}입니다. "
+        f"사용자 id는 {user.id}이며 {_user_identity(user)} "
+        "다른 사람을 지목하지 않은 출근은 find_self_employee로 본인을 정하고 바로 저장합니다. "
+        "그 경우 이름을 묻지 않습니다. "
         "멤버, 스키마, 레코드는 도구로 조회합니다. "
         "values의 키는 get_database_schema에 있는 slug만 사용합니다. "
         "날짜 범위는 그 date 속성에 {\"start\",\"end\"}로 넣습니다. "
@@ -623,9 +641,148 @@ def _system_prompt(session: AgentSession, user) -> str:
     )
 
 
+def _user_identity(user) -> str:
+    name = str(user.name or "").strip()
+    if name:
+        return f"이름은 {name}이고 이메일은 {user.email}입니다."
+    return f"이름은 비어 있고 이메일은 {user.email}입니다."
+
+
+def _employee_matches(user, workspace_id: int, filters: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    try:
+        result = query_records(
+            user,
+            {
+                "workspace_id": workspace_id,
+                "database_slug": "employees",
+                "filters": filters,
+                "page": 1,
+                "page_size": 20,
+            },
+        )
+    except HttpError:
+        return []
+    return list(result.get("data") or [])
+
+
+def find_self_employee(user, workspace_id: int) -> dict[str, Any]:
+    """계정 이메일과 같은 임직원을 먼저 찾고, 없으면 계정 이름과 제목이 같은 행을 찾습니다."""
+    email = str(user.email or "").strip()
+    name = str(user.name or "").strip()
+    matches: list[dict[str, Any]] = []
+    if email:
+        matches = _employee_matches(
+            user,
+            workspace_id,
+            [{"property": "email", "op": "eq", "value": email}],
+        )
+    if not matches and name:
+        matches = _employee_matches(
+            user,
+            workspace_id,
+            [{"property": "title", "op": "eq", "value": name}],
+        )
+    cards = [{"id": row["id"], "title": row["title"]} for row in matches]
+    if len(cards) == 1:
+        return {"found": True, "id": cards[0]["id"], "title": cards[0]["title"]}
+    return {"found": False, "matches": cards}
+
+
+def _is_self_clock_in(text: str) -> bool:
+    cleaned = re.sub(r"\s+", " ", text.strip())
+    return _SELF_CLOCK_IN.match(cleaned) is not None
+
+
+def _attendance_database(user, workspace_id: int):
+    return (
+        accessible_databases(user).filter(workspace_id=workspace_id, slug="attendance").first()
+    )
+
+
+def _today_attendance(user, workspace_id: int, employee_id: int) -> dict[str, Any] | None:
+    today = timezone.now().date().isoformat()
+    rows = []
+    try:
+        result = query_records(
+            user,
+            {
+                "workspace_id": workspace_id,
+                "database_slug": "attendance",
+                "filters": [
+                    {"property": "employee", "op": "eq", "value": employee_id},
+                    {"property": "work_date", "op": "eq", "value": today},
+                ],
+                "page": 1,
+                "page_size": 1,
+            },
+        )
+        rows = list(result.get("data") or [])
+    except HttpError:
+        return None
+    if not rows:
+        return None
+    return rows[0]
+
+
+def _clock_in_self(user, session: AgentSession, text: str) -> dict[str, Any] | None:
+    if session.database_slug and session.database_slug != "attendance":
+        return None
+    if not _is_self_clock_in(text):
+        return None
+    database = _attendance_database(user, session.workspace_id)
+    if database is None:
+        return None
+    slugs = set(database.properties.values_list("slug", flat=True))
+    if "employee" not in slugs:
+        return None
+    employee = find_self_employee(user, session.workspace_id)
+    if not employee["found"]:
+        return None
+    existing = _today_attendance(user, session.workspace_id, int(employee["id"]))
+    if existing is not None:
+        title = str(existing.get("title") or "")
+        answer = f"오늘 출근은 이미 있습니다. 레코드 {existing['id']} {title}."
+        return _reply(session, answer, [])
+    today = timezone.now().date().isoformat()
+    values: dict[str, Any] = {"employee": [employee["id"]]}
+    if "work_date" in slugs:
+        values["work_date"] = today
+    created: list[int] = []
+    with transaction.atomic():
+        action = ProposedAction.objects.create(
+            session=session,
+            kind=ProposedAction.Kind.CREATE_RECORD,
+            payload={
+                "database_slug": "attendance",
+                "title": f"{today} 출근",
+                "values": values,
+                "blocks": [],
+            },
+        )
+        _confirm_immediate_record(user, session, action)
+        created.append(action.id)
+    return _reply(session, _immediate_saved_notice(created), created)
+
+
+def _reply(session: AgentSession, answer: str, created: list[int]) -> dict[str, Any]:
+    message = AgentMessage.objects.create(
+        session=session,
+        role=AgentMessage.Role.ASSISTANT,
+        content=answer,
+    )
+    session.save(update_fields=["updated_at"])
+    actions = ProposedAction.objects.filter(id__in=created).order_by("id")
+    return {
+        "message": serialize_message(message),
+        "proposed_actions": [serialize_action(action) for action in actions],
+    }
+
+
 def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any], created: list[int]) -> Any:
     if name == "list_members":
         return list_members(user, session.workspace_id)
+    if name == "find_self_employee":
+        return find_self_employee(user, session.workspace_id)
     if name == "list_databases":
         databases = accessible_databases(user).filter(workspace_id=session.workspace_id)
         if session.database_slug:
@@ -815,6 +972,9 @@ def send_message(user, session_id: int, content: str, model: str = "") -> dict[s
         raise HttpError(400, "내용은 4000자를 넘길 수 없습니다.")
     session = _session(user, session_id)
     AgentMessage.objects.create(session=session, role=AgentMessage.Role.USER, content=text)
+    clocked = _clock_in_self(user, session, text)
+    if clocked is not None:
+        return clocked
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": _system_prompt(session, user)},
         *_history(session),
@@ -854,17 +1014,7 @@ def send_message(user, session_id: int, content: str, model: str = "") -> dict[s
     saved_notice = _immediate_saved_notice(created)
     if saved_notice:
         answer = saved_notice
-    message = AgentMessage.objects.create(
-        session=session,
-        role=AgentMessage.Role.ASSISTANT,
-        content=answer,
-    )
-    session.save(update_fields=["updated_at"])
-    actions = ProposedAction.objects.filter(id__in=created).order_by("id")
-    return {
-        "message": serialize_message(message),
-        "proposed_actions": [serialize_action(action) for action in actions],
-    }
+    return _reply(session, answer, created)
 
 
 def _apply_proposed_action(user, session: AgentSession, action: ProposedAction) -> tuple[str, dict[str, Any]]:

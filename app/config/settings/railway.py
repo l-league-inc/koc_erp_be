@@ -295,5 +295,9 @@ sentry_sdk.init(
 WORKBOT_SCHEDULER_ENABLED = os.getenv("WORKBOT_SCHEDULER", "1") != "0"
 WORKBOT_SCHEDULER_INTERVAL = int(os.getenv("WORKBOT_SCHEDULER_INTERVAL", 30))
 
+# 받은편지함 도착 알림. 끄려면 MAIL_WATCH=0
+MAIL_WATCH_ENABLED = os.getenv("MAIL_WATCH", "1") != "0"
+MAIL_WATCH_INTERVAL = int(os.getenv("MAIL_WATCH_INTERVAL", 60))
+
 # Scheduling
 SCHEDULING_SECRET_KEY = os.getenv("SCHEDULING_SECRET_KEY")

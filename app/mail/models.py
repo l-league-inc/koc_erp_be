@@ -4,6 +4,10 @@ from django.db import models
 from common.models import CommonModel
 
 
+def default_notify_importances() -> list[str]:
+    return ["urgent", "normal", "low"]
+
+
 class UserMailAccount(CommonModel):
     """유저별 Daum 또는 Naver IMAP/SMTP 로그인 정보입니다."""
 
@@ -32,6 +36,20 @@ class UserMailAccount(CommonModel):
         help_text="마지막 연결 확인 시각",
     )
     last_error = models.TextField(blank=True, default="", help_text="마지막 연결 오류")
+    notify_importances = models.JSONField(
+        default=default_notify_importances,
+        help_text="알림을 받을 중요도. urgent, normal, low",
+    )
+    inbox_uidvalidity = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+        help_text="받은편지함 UIDVALIDITY. 바뀌면 커서를 다시 잡습니다.",
+    )
+    inbox_last_uid = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+        help_text="알림을 처리한 마지막 받은편지함 UID",
+    )
 
     class Meta:
         constraints = [

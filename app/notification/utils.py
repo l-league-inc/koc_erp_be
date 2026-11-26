@@ -2,8 +2,8 @@ from notification.models import Notification
 from notification.fcm_utils import send_push_notification
 
 
-def make_notification_sync(user, message, metadata=None):
-    Notification.objects.create(
+def make_notification_sync(user, message, metadata=None) -> Notification:
+    notification = Notification.objects.create(
         user=user,
         message=message,
         metadata=metadata or {},
@@ -24,6 +24,7 @@ def make_notification_sync(user, message, metadata=None):
             )
         except Exception:
             pass
+    return notification
 
 
 async def make_notification(user, message, metadata=None):

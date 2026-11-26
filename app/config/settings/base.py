@@ -169,6 +169,10 @@ USE_TZ = False
 WORKBOT_SCHEDULER_ENABLED = False
 WORKBOT_SCHEDULER_INTERVAL = 30
 
+# 받은편지함 도착 알림. 서버 프로세스가 이 주기(초)마다 새 메일을 확인합니다.
+MAIL_WATCH_ENABLED = True
+MAIL_WATCH_INTERVAL = 60
+
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/3.2/howto/static-files/
 

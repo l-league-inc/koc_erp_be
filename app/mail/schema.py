@@ -18,6 +18,11 @@ class MailAccountResponseSchema(Schema):
     is_verified: bool
     last_verified_at: Optional[datetime] = None
     last_error: str = ""
+    notify_importances: list[str]
+
+
+class MailNotifySchema(Schema):
+    importances: list[str]
 
 
 class MailMessageListItemSchema(Schema):

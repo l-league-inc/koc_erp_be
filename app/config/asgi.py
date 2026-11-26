@@ -40,5 +40,7 @@ application = get_application()
 
 # 서버 프로세스에서만 워크봇 예약 실행기를 띄운다. migrate 같은 관리 명령은 asgi를 읽지 않는다.
 from assistant.scheduler import start_scheduler  # noqa: E402
+from mail.watch import start_watch  # noqa: E402
 
 start_scheduler()
+start_watch()

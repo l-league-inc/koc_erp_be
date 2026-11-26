@@ -106,6 +106,34 @@ class NewNotificationWebSocketTest(TransactionTestCase):
 
         await communicator.disconnect()
 
+    async def test_mail_notification_reaches_the_socket(self) -> None:
+        communicator = await self._connect(self.invited_user)
+        channel_layer = get_channel_layer()
+        payload = {
+            "id": 40,
+            "message": "[긴급] 오늘 마감 견적 · client@example.com",
+            "is_read": False,
+            "created_at": "2026-11-26T15:40:00",
+            "metadata": {
+                "kind": "mail",
+                "importance": "urgent",
+                "uid": "12345",
+                "folder": "INBOX",
+                "subject": "오늘 마감 견적",
+                "sender": "client@example.com",
+            },
+        }
+        await channel_layer.group_send(
+            f"notification_{self.invited_user.id}",
+            {"type": "new_notification", "notification": payload, "has_unread": True},
+        )
+        response = await communicator.receive_json_from()
+        self.assertEqual(response["type"], "new_notification")
+        self.assertEqual(response["notification"]["metadata"]["kind"], "mail")
+        self.assertEqual(response["notification"]["id"], 40)
+        self.assertTrue(response["has_unread"])
+        await communicator.disconnect()
+
     async def test_handler_tolerates_missing_keys(self) -> None:
         """payload 키가 없어도 소켓이 끊기지 않는다."""
         communicator = await self._connect(self.invited_user)

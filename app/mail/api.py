@@ -6,6 +6,7 @@ from mail import service
 from mail.schema import (
     MailAccountResponseSchema,
     MailAccountUpsertSchema,
+    MailNotifySchema,
     MailMessageDetailSchema,
     MailMessageListItemSchema,
     MailSendResponseSchema,
@@ -39,6 +40,20 @@ async def upsert_account_api(request, payload: MailAccountUpsertSchema):
         payload.username,
         payload.app_password,
         payload.provider,
+    )
+
+
+@router.put(
+    "/account/notify",
+    summary="[C] 메일 알림 범위",
+    description="받을 중요도입니다. urgent, normal, low 중 하나 이상입니다. 비우면 400입니다.",
+    response=MailAccountResponseSchema,
+    auth=jwt_auth,
+)
+async def update_notify_api(request, payload: MailNotifySchema):
+    return await sync_to_async(service.update_notify_importances)(
+        request.auth,
+        payload.importances,
     )
 
 

@@ -3,6 +3,9 @@ from .local import *
 # 테스트 환경 플래그
 TESTING = True
 
+# 테스트가 ASGI를 불러도 받은편지함을 확인하지 않습니다.
+MAIL_WATCH_ENABLED = False
+
 # Redis 설정 변경
 REDIS_TEST_DB = 1  # 테스트용 Redis 데이터베이스 인덱스
 

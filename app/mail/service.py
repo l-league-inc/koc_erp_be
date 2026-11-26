@@ -9,6 +9,7 @@ from django.utils import timezone
 from ninja.errors import HttpError
 
 from mail import crypto, daum
+from mail.importance import LEVELS, normalize_levels
 from mail.models import UserMailAccount
 from mail.servers import MailServer, get_server
 
@@ -39,6 +40,7 @@ def serialize_account(account: UserMailAccount | None) -> dict[str, Any]:
             "is_verified": False,
             "last_verified_at": None,
             "last_error": "",
+            "notify_importances": list(LEVELS),
         }
     return {
         "configured": True,
@@ -48,6 +50,7 @@ def serialize_account(account: UserMailAccount | None) -> dict[str, Any]:
         "is_verified": account.is_verified,
         "last_verified_at": account.last_verified_at,
         "last_error": account.last_error or "",
+        "notify_importances": normalize_levels(account.notify_importances),
     }
 
 
@@ -120,6 +123,9 @@ def upsert_account(user, username: str, app_password: str, provider: str = "daum
             account = deleted
         else:
             account = UserMailAccount(user=user)
+    if account.pk and (account.username != name or account.provider != server.provider):
+        account.inbox_last_uid = None
+        account.inbox_uidvalidity = None
     account.provider = server.provider
     account.username = name
     account.password_encrypted = encrypted
@@ -127,6 +133,22 @@ def upsert_account(user, username: str, app_password: str, provider: str = "daum
     account.last_verified_at = timezone.now()
     account.last_error = ""
     account.save()
+    return serialize_account(account)
+
+
+@transaction.atomic
+def update_notify_importances(user, importances: list[str]) -> dict[str, Any]:
+    if not importances:
+        raise HttpError(400, "수신 범위를 하나 이상 고르세요.")
+    chosen: list[str] = []
+    for item in importances:
+        if item not in LEVELS:
+            raise HttpError(400, "수신 범위는 urgent, normal, low만 쓸 수 있습니다.")
+        if item not in chosen:
+            chosen.append(item)
+    account = _load_account(user)
+    account.notify_importances = chosen
+    account.save(update_fields=["notify_importances", "updated_at"])
     return serialize_account(account)
 
 

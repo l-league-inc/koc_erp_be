@@ -159,6 +159,75 @@ def test_connection(username: str, password: str, server: MailServer) -> None:
         pass
 
 
+def _uid_tokens(data: list) -> list[bytes]:
+    raw = data[0] if data else b""
+    if not isinstance(raw, (bytes, bytearray)):
+        return []
+    return [item for item in raw.split() if item]
+
+
+def _uidvalidity(client: imaplib.IMAP4_SSL) -> int:
+    _status, data = client.response("UIDVALIDITY")
+    if not data or data[0] in (None, b""):
+        return 0
+    try:
+        return int(data[0])
+    except (TypeError, ValueError):
+        return 0
+
+
+def _summaries(client: imaplib.IMAP4_SSL, uids: list[bytes], folder: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for uid in uids:
+        status, fetched = client.uid(
+            "fetch",
+            uid,
+            "(FLAGS BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)] BODY.PEEK[TEXT]<0.400>)",
+        )
+        if status != "OK" or not fetched or fetched[0] is None:
+            continue
+        flags_blob = ""
+        header_blob = b""
+        text_blob = b""
+        for part in fetched:
+            if not isinstance(part, tuple) or len(part) < 2:
+                if isinstance(part, (bytes, bytearray)):
+                    flags_blob += part.decode("utf-8", errors="ignore")
+                continue
+            meta = part[0]
+            if isinstance(meta, (bytes, bytearray)):
+                flags_blob += meta.decode("utf-8", errors="ignore")
+            payload = part[1] if isinstance(part[1], (bytes, bytearray)) else b""
+            if isinstance(meta, (bytes, bytearray)) and b"HEADER" in meta.upper():
+                header_blob = payload
+            else:
+                text_blob = payload
+        msg = email.message_from_bytes(header_blob or b"")
+        snippet = ""
+        if text_blob:
+            snippet = re.sub(r"\s+", " ", text_blob.decode("utf-8", errors="replace")).strip()
+            snippet = snippet[:_SNIPPET_LIMIT]
+        flags = []
+        if "\\Seen" in flags_blob:
+            flags.append("seen")
+        if "\\Flagged" in flags_blob:
+            flags.append("flagged")
+        if "\\Seen" not in flags_blob:
+            flags.append("unseen")
+        items.append(
+            {
+                "uid": uid.decode("ascii") if isinstance(uid, (bytes, bytearray)) else str(uid),
+                "folder": folder,
+                "subject": _decode_header_value(msg.get("Subject")),
+                "sender": _decode_header_value(msg.get("From")),
+                "date": _parse_date(msg.get("Date")),
+                "flags": flags,
+                "snippet": snippet,
+            }
+        )
+    return items
+
+
 def list_messages(
     username: str,
     password: str,
@@ -178,64 +247,50 @@ def list_messages(
         status, data = client.uid("search", None, criteria)
         if status != "OK":
             raise HttpError(502, "메일 목록을 가져오지 못했습니다.")
-        uids = (data[0] or b"").split()
+        uids = _uid_tokens(data)
         selected = list(reversed(uids[-limit:]))
-        items: list[dict[str, Any]] = []
-        for uid in selected:
-            status, fetched = client.uid(
-                "fetch",
-                uid,
-                "(FLAGS BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)] BODY.PEEK[TEXT]<0.400>)",
-            )
-            if status != "OK" or not fetched or fetched[0] is None:
-                continue
-            flags_blob = ""
-            header_blob = b""
-            text_blob = b""
-            for part in fetched:
-                if not isinstance(part, tuple) or len(part) < 2:
-                    if isinstance(part, (bytes, bytearray)):
-                        flags_blob += part.decode("utf-8", errors="ignore")
-                    continue
-                meta = part[0]
-                if isinstance(meta, (bytes, bytearray)):
-                    flags_blob += meta.decode("utf-8", errors="ignore")
-                payload = part[1] if isinstance(part[1], (bytes, bytearray)) else b""
-                if b"HEADER" in meta.upper() if isinstance(meta, (bytes, bytearray)) else False:
-                    header_blob = payload
-                else:
-                    text_blob = payload
-            msg = email.message_from_bytes(header_blob or b"")
-            subject = _decode_header_value(msg.get("Subject"))
-            sender = _decode_header_value(msg.get("From"))
-            date = _parse_date(msg.get("Date"))
-            snippet = ""
-            if text_blob:
-                try:
-                    snippet = text_blob.decode("utf-8", errors="replace")
-                except Exception:
-                    snippet = ""
-                snippet = re.sub(r"\s+", " ", snippet).strip()[:_SNIPPET_LIMIT]
-            flags = []
-            if "\\Seen" in flags_blob:
-                flags.append("seen")
-            if "\\Flagged" in flags_blob:
-                flags.append("flagged")
-            if "UNSEEN" in criteria or "\\Seen" not in flags_blob:
-                if "\\Seen" not in flags_blob:
-                    flags.append("unseen")
-            items.append(
-                {
-                    "uid": uid.decode("ascii") if isinstance(uid, (bytes, bytearray)) else str(uid),
-                    "folder": folder,
-                    "subject": subject,
-                    "sender": sender,
-                    "date": date,
-                    "flags": flags,
-                    "snippet": snippet,
-                }
-            )
-        return items
+        return _summaries(client, selected, folder)
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+def inbox_since(
+    username: str,
+    password: str,
+    server: MailServer,
+    *,
+    after_uid: int | None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """받은편지함에서 after_uid보다 큰 메일을 오래된 순으로 가져옵니다.
+
+    after_uid가 None이면 알림 없이 현재 마지막 UID만 돌려줍니다.
+    """
+    limit = max(1, min(int(limit or 20), 20))
+    client = _imap_login(username, password, server)
+    try:
+        status, _ = client.select("INBOX", readonly=True)
+        if status != "OK":
+            raise HttpError(502, "메일함 폴더를 열 수 없습니다.")
+        validity = _uidvalidity(client)
+        if after_uid is None:
+            status, data = client.uid("search", None, "ALL")
+            if status != "OK":
+                raise HttpError(502, "메일 목록을 가져오지 못했습니다.")
+            uids = _uid_tokens(data)
+            highest = int(uids[-1]) if uids else 0
+            return {"uidvalidity": validity, "highest": highest, "messages": []}
+        start = int(after_uid) + 1
+        status, data = client.uid("search", None, f"UID {start}:*")
+        if status != "OK":
+            raise HttpError(502, "메일 목록을 가져오지 못했습니다.")
+        chosen = [uid for uid in _uid_tokens(data) if int(uid) >= start][:limit]
+        messages = _summaries(client, chosen, "INBOX")
+        highest = int(chosen[-1]) if chosen else int(after_uid)
+        return {"uidvalidity": validity, "highest": highest, "messages": messages}
     finally:
         try:
             client.logout()

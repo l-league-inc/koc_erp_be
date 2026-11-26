@@ -18,6 +18,7 @@ from user.kakaoapi_v2 import router as kakao_v2_router
 from user.tossapi import router as toss_router
 from verification.api import router as verify_router
 from assistant.api import agent_router, search_router, workbot_router
+from attendance.api import router as attendance_router
 from document.api import router as document_router
 from estimate.api import router as estimate_router
 from drive.api import router as drive_router
@@ -85,6 +86,7 @@ base_api.add_router("api/v1/notice", notice_router)
 base_api.add_router("api/v1/verify", verify_router)
 base_api.add_router("api/v1/notification", notification_router)
 base_api.add_router("api/v1/workspace", workspace_router)
+base_api.add_router("api/v1/attendance", attendance_router)
 base_api.add_router("api/v1/agent", agent_router)
 base_api.add_router("api/v1/search", search_router)
 base_api.add_router("api/v1/workbot", workbot_router)

@@ -96,6 +96,9 @@ class AgentApiTests(TestCase):
             database=attendance, name="근무일", slug="work_date", type=Property.Type.DATE
         )
         Property.objects.create(
+            database=attendance, name="출근시각", slug="check_in", type=Property.Type.DATE
+        )
+        Property.objects.create(
             database=attendance,
             name="임직원",
             slug="employee",
@@ -355,6 +358,10 @@ class AgentApiTests(TestCase):
         self.assertEqual(action["status"], "confirmed")
         self.assertEqual(action["payload"]["values"]["employee"], [person["id"]])
         self.assertTrue(action["payload"]["title"].endswith("출근"))
+        self.assertRegex(
+            action["payload"]["values"]["check_in"],
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$",
+        )
         with patch("assistant.agent.llm.complete", _forbid):
             again = await self.client.post(
                 f"/session/{session_id}/message",

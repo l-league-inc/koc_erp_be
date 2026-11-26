@@ -87,6 +87,7 @@ LOCAL_APPS = [
     "wiki",
     "mcp_server",
     "workspace",
+    "attendance",
     "assistant",
     "document",
     "mail",

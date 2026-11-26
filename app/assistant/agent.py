@@ -743,10 +743,16 @@ def _clock_in_self(user, session: AgentSession, text: str) -> dict[str, Any] | N
         title = str(existing.get("title") or "")
         answer = f"오늘 출근은 이미 있습니다. 레코드 {existing['id']} {title}."
         return _reply(session, answer, [])
-    today = timezone.now().date().isoformat()
+    moment = timezone.now()
+    if timezone.is_aware(moment):
+        moment = timezone.make_naive(moment)
+    moment = moment.replace(microsecond=0)
+    today = moment.date().isoformat()
     values: dict[str, Any] = {"employee": [employee["id"]]}
     if "work_date" in slugs:
         values["work_date"] = today
+    if "check_in" in slugs:
+        values["check_in"] = moment.isoformat()
     created: list[int] = []
     with transaction.atomic():
         action = ProposedAction.objects.create(

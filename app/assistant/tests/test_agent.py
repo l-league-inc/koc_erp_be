@@ -20,7 +20,7 @@ from assistant.models import AgentSession, ProposedAction, Skill
 from user.utils import get_access_token
 from workspace.models import Database, Property, Record, RecordActivity, Workspace
 from workspace.seed import seed_koc_workspace
-from workspace.utils import create_record
+from workspace.utils import create_record, serialize_record
 
 User = get_user_model()
 
@@ -170,6 +170,70 @@ class AgentApiTests(TestCase):
             headers=self.headers(self.outsider),
         )
         self.assertEqual(hidden.status_code, 404)
+
+    async def test_confirm_normalizes_status_and_drops_unknown(self):
+        workspace_id = await self._workspace_id()
+        created = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id, "database_slug": "daily"},
+            headers=self.headers(),
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        session_id = created.json()["id"]
+        session = await sync_to_async(AgentSession.objects.get)(id=session_id)
+        drafted = await sync_to_async(_dispatch)(
+            session,
+            self.user,
+            "propose_create_record",
+            {
+                "database_slug": "daily",
+                "title": "상태 없는 업무",
+                "values": {"status": "예정", "memo": "장비 확인"},
+            },
+            [],
+        )
+        self.assertNotIn("status", drafted["payload"]["values"])
+        self.assertEqual(drafted["payload"]["values"]["memo"], "장비 확인")
+
+        stored = await sync_to_async(ProposedAction.objects.create)(
+            session_id=session_id,
+            kind=ProposedAction.Kind.CREATE_RECORD,
+            payload={
+                "database_slug": "daily",
+                "title": "오전 점검",
+                "values": {"status": "진행중", "memo": "현장"},
+                "blocks": [],
+            },
+        )
+        unknown = await sync_to_async(ProposedAction.objects.create)(
+            session_id=session_id,
+            kind=ProposedAction.Kind.CREATE_RECORD,
+            payload={
+                "database_slug": "daily",
+                "title": "상태 없는 확정",
+                "values": {"status": {"name": "시작"}, "memo": "메모"},
+                "blocks": [],
+            },
+        )
+        confirmed = await self.client.post(
+            f"/session/{session_id}/confirm",
+            json={"action_ids": [stored.id, unknown.id]},
+            headers=self.headers(),
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.json())
+        by_title = {item["title"]: item["record_id"] for item in confirmed.json()["records"]}
+
+        async def values_of(title: str) -> dict:
+            record = await sync_to_async(Record.objects.get)(id=by_title[title])
+            saved = await sync_to_async(serialize_record)(record)
+            return saved["values"]
+
+        spaced = await values_of("오전 점검")
+        self.assertEqual(spaced["status"], "진행 중")
+        self.assertEqual(spaced["memo"], "현장")
+        dropped = await values_of("상태 없는 확정")
+        self.assertNotIn("status", dropped)
+        self.assertEqual(dropped["memo"], "메모")
 
     async def test_next_turn_sees_confirmed_draft(self):
         workspace_id = await self._workspace_id()

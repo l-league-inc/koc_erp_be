@@ -28,6 +28,7 @@ from workspace.utils import (
     get_membership,
     get_record,
     list_members,
+    match_option_name,
     query_records,
     serialize_database,
     update_record,
@@ -514,15 +515,47 @@ def delete_session(user, session_id: int) -> None:
 
 def _prepare_values(database, values: dict[str, Any]) -> dict[str, Any]:
     folded = fold_date_range_aliases(database, values)
-    known = set(database.properties.values_list("slug", flat=True))
-    unknown = [slug for slug in folded if slug not in known]
+    props = {prop.slug: prop for prop in database.properties.all()}
+    unknown = [slug for slug in folded if slug not in props]
     if unknown:
-        allowed = ", ".join(sorted(known))
+        allowed = ", ".join(sorted(props))
         raise HttpError(
             400,
             f"속성 {unknown[0]}을 찾을 수 없습니다. 쓸 수 있는 속성은 {allowed}입니다.",
         )
-    return folded
+    return _align_option_values(props, folded)
+
+
+def _align_option_values(props: dict[str, Property], values: dict[str, Any]) -> dict[str, Any]:
+    """스키마에 없는 선택·상태 값은 빼고, 같은 옵션의 다른 표기는 옵션 이름으로 맞춥니다."""
+    aligned: dict[str, Any] = {}
+    for slug, raw in values.items():
+        prop = props[slug]
+        if prop.type in {Property.Type.SELECT, Property.Type.STATUS}:
+            if raw is None or raw == "" or raw == []:
+                aligned[slug] = raw
+                continue
+            matched = match_option_name(prop, raw)
+            if matched is None:
+                continue
+            aligned[slug] = matched
+            continue
+        if prop.type == Property.Type.MULTI_SELECT:
+            if raw is None or raw == "" or raw == []:
+                aligned[slug] = raw
+                continue
+            if not isinstance(raw, list):
+                continue
+            names: list[str] = []
+            for item in raw:
+                matched = match_option_name(prop, item)
+                if matched and matched not in names:
+                    names.append(matched)
+            if names:
+                aligned[slug] = names
+            continue
+        aligned[slug] = raw
+    return aligned
 
 
 def _history(session: AgentSession) -> list[dict[str, str]]:
@@ -1167,16 +1200,28 @@ def send_message(user, session_id: int, content: str, model: str = "") -> dict[s
     return _reply(session, answer, created)
 
 
+def _aligned_payload_values(database, payload: dict[str, Any]) -> dict[str, Any]:
+    raw = payload.get("values") or {}
+    if not isinstance(raw, dict):
+        raise HttpError(400, "값은 객체여야 합니다.")
+    values = _prepare_values(database, raw)
+    if values != raw:
+        payload["values"] = values
+    return values
+
+
 def _apply_proposed_action(user, session: AgentSession, action: ProposedAction) -> tuple[str, dict[str, Any]]:
-    payload = action.payload or {}
+    payload = dict(action.payload or {})
     if action.kind == ProposedAction.Kind.CREATE_RECORD:
         database = _database(user, session.workspace_id, payload["database_slug"])
+        values = _aligned_payload_values(database, payload)
+        action.payload = payload
         saved = create_record(
             user,
             database.id,
             {
                 "title": payload.get("title"),
-                "values": payload.get("values") or {},
+                "values": values,
                 "blocks": payload.get("blocks") or [],
             },
             RecordActivity.Source.AGENT,
@@ -1194,6 +1239,10 @@ def _apply_proposed_action(user, session: AgentSession, action: ProposedAction) 
             "title": payload.get("title"),
             "values": payload.get("values"),
         }
+        if isinstance(payload.get("values"), dict):
+            record = get_record(user, int(payload["record_id"]))
+            update_data["values"] = _aligned_payload_values(record.database, payload)
+            action.payload = payload
         if "blocks" in payload:
             update_data["blocks"] = payload.get("blocks") or []
         saved = update_record(
@@ -1241,7 +1290,7 @@ def _apply_proposed_action(user, session: AgentSession, action: ProposedAction) 
     else:
         raise HttpError(400, "지원하지 않는 초안입니다.")
     action.status = ProposedAction.Status.CONFIRMED
-    action.save(update_fields=["status", "result", "updated_at"])
+    action.save(update_fields=["status", "result", "payload", "updated_at"])
     return bucket, item
 
 

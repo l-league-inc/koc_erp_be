@@ -60,6 +60,27 @@ class WorkspaceApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    async def test_status_matches_spacing_and_option_object(self):
+        sales_id = await self._sales_id()
+        headers = self.headers()
+        spaced = await self.client.post(
+            f"/database/{sales_id}/record",
+            json={"title": "견적 진행중", "values": {"status": "진행중", "kind": "견적"}},
+            headers=headers,
+        )
+        self.assertEqual(spaced.status_code, 201, spaced.json())
+        self.assertEqual(spaced.json()["values"]["status"], "진행 중")
+        wrapped = await self.client.post(
+            f"/database/{sales_id}/record",
+            json={
+                "title": "견적 객체",
+                "values": {"status": {"name": "진행 중"}, "kind": "견적"},
+            },
+            headers=headers,
+        )
+        self.assertEqual(wrapped.status_code, 201, wrapped.json())
+        self.assertEqual(wrapped.json()["values"]["status"], "진행 중")
+
     async def test_query_filters_status(self):
         sales_id = await self._sales_id()
         headers = self.headers()

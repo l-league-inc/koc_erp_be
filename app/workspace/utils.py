@@ -435,12 +435,67 @@ def _options(prop: Property) -> list[dict[str, Any]]:
     return options
 
 
-def canonical_option_name(prop: Property, raw: Any) -> str:
+def _option_key(value: str) -> str:
+    """공백·밑줄·하이픈을 지운 비교 키입니다. `진행중`과 `진행 중`을 같게 봅니다."""
+    return re.sub(r"[\s_\-]+", "", value).casefold()
+
+
+def _option_candidates(raw: Any) -> list[str]:
+    if isinstance(raw, dict):
+        tokens: list[str] = []
+        for key in ("name", "id"):
+            value = raw.get(key)
+            if value in (None, "") or isinstance(value, (dict, list)):
+                continue
+            token = str(value).strip()
+            if token and token not in tokens:
+                tokens.append(token)
+        return tokens
+    if isinstance(raw, list) and len(raw) == 1:
+        return _option_candidates(raw[0])
+    if isinstance(raw, (dict, list)):
+        return []
     token = str(raw).strip()
-    for option in _options(prop):
-        if token in {str(option.get("id", "")), str(option.get("name", ""))}:
-            return str(option["name"])
-    raise HttpError(400, f"{prop.name}에 없는 값입니다.")
+    return [token] if token else []
+
+
+def match_option_name(prop: Property, raw: Any) -> str | None:
+    """옵션 이름 또는 id와 맞으면 그 이름을 돌려줍니다. 없으면 None입니다."""
+    tokens = _option_candidates(raw)
+    if not tokens:
+        return None
+    options = _options(prop)
+    for token in tokens:
+        for option in options:
+            if token in {str(option.get("id", "")), str(option.get("name", ""))}:
+                return str(option["name"])
+    folded = {key for key in (_option_key(token) for token in tokens) if key}
+    if not folded:
+        return None
+    matches: list[str] = []
+    for option in options:
+        keys = {
+            key
+            for key in (
+                _option_key(str(option.get("id", ""))),
+                _option_key(str(option.get("name", ""))),
+            )
+            if key
+        }
+        if folded & keys:
+            name = str(option["name"])
+            if name not in matches:
+                matches.append(name)
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def canonical_option_name(prop: Property, raw: Any) -> str:
+    name = match_option_name(prop, raw)
+    if name is None:
+        raise HttpError(400, f"{prop.name}에 없는 값입니다.")
+    return name
 
 
 def _generated_option_id(name: str, taken: set[str]) -> str:

@@ -714,6 +714,129 @@ class AgentApiTests(TestCase):
         self.assertEqual(period["end"], "2026-11-06")
         self.assertNotIn("end_date", action["payload"]["values"])
 
+    def _leave_database(self, workspace_id: int) -> Database:
+        database = self._ensure_database(workspace_id, "leave", "휴가")
+        for name, slug, prop_type in (
+            ("휴가신청명", "title", Property.Type.TITLE),
+            ("휴가사유", "reason", Property.Type.TEXT),
+            ("시작일", "start_date", Property.Type.DATE),
+            ("종료일", "end_date", Property.Type.DATE),
+        ):
+            Property.objects.create(database=database, name=name, slug=slug, type=prop_type)
+        return database
+
+    async def test_pending_leave_revision_survives_an_unfinished_turn(self):
+        workspace_id = await self._workspace_id()
+        await sync_to_async(self._leave_database)(workspace_id)
+        session = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id},
+            headers=self.headers(),
+        )
+        session_id = session.json()["id"]
+        stored = await sync_to_async(AgentSession.objects.get)(id=session_id)
+        created = await sync_to_async(_dispatch)(
+            stored,
+            self.user,
+            "propose_create_record",
+            {
+                "database_slug": "leave",
+                "title": "11월 연차",
+                "values": {
+                    "reason": "개인사유",
+                    "start_date": "2026-11-27",
+                    "end_date": "2026-11-27",
+                },
+            },
+            [],
+        )
+        self.assertEqual(created["payload"]["values"]["start_date"], "2026-11-27")
+        self.assertNotIn("period", created["payload"]["values"])
+        action_id = created["id"]
+        seen: dict[str, str] = {}
+
+        def complete(messages, tools, model=None):
+            seen["system"] = messages[0]["content"]
+            if not any(item.get("role") == "tool" for item in messages):
+                return {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "revise_leave",
+                            "name": "revise_pending_action",
+                            "arguments": {
+                                "action_id": action_id,
+                                "values": {"reason": "병가", "end_date": "2026-11-28"},
+                            },
+                        }
+                    ],
+                }
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "query_leave_again",
+                        "name": "query_records",
+                        "arguments": {"database_slug": "leave", "q": "연차"},
+                    }
+                ],
+            }
+
+        with patch("assistant.agent.llm.complete", complete):
+            message = await self.client.post(
+                f"/session/{session_id}/message",
+                json={"content": "휴가 사유를 병가로 바꾸고 종료일을 28일로 해줘"},
+                headers=self.headers(),
+            )
+        self.assertEqual(message.status_code, 200, message.json())
+        self.assertNotIn("요청을 마치지 못했습니다", message.json()["message"]["content"])
+        self.assertIn("확정하기 전에는 저장되지 않습니다", message.json()["message"]["content"])
+        self.assertIn("revise_pending_action", seen["system"])
+        self.assertIn("record_id가 없습니다", seen["system"])
+        action = message.json()["proposed_actions"][0]
+        self.assertEqual(action["id"], action_id)
+        self.assertEqual(action["status"], "pending")
+        self.assertEqual(action["payload"]["values"]["reason"], "병가")
+        self.assertEqual(action["payload"]["values"]["end_date"], "2026-11-28")
+        self.assertEqual(action["payload"]["values"]["start_date"], "2026-11-27")
+        self.assertEqual(
+            await sync_to_async(ProposedAction.objects.filter(session_id=session_id).count)(),
+            1,
+        )
+
+    async def test_update_tool_revises_a_pending_leave_when_the_record_is_missing(self):
+        workspace_id = await self._workspace_id()
+        await sync_to_async(self._leave_database)(workspace_id)
+        session = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id},
+            headers=self.headers(),
+        )
+        stored = await sync_to_async(AgentSession.objects.get)(id=session.json()["id"])
+        created = await sync_to_async(_dispatch)(
+            stored,
+            self.user,
+            "propose_create_record",
+            {
+                "database_slug": "leave",
+                "title": "11월 연차",
+                "values": {"reason": "개인사유", "start_date": "2026-11-27"},
+            },
+            [],
+        )
+        await sync_to_async(Record.objects.filter(id=created["id"]).delete)()
+        revised = await sync_to_async(_dispatch)(
+            stored,
+            self.user,
+            "propose_update_record",
+            {"record_id": created["id"], "values": {"reason": "경조사"}},
+            [],
+        )
+        self.assertEqual(revised["id"], created["id"])
+        self.assertEqual(revised["kind"], "create_record")
+        self.assertEqual(revised["payload"]["values"]["reason"], "경조사")
+        self.assertEqual(revised["payload"]["values"]["start_date"], "2026-11-27")
+
     async def test_mail_bundled_skill_and_send_confirm(self):
         workspace_id = await self._workspace_id()
         listed = await self.client.get(
@@ -891,6 +1014,9 @@ class EstimateSkillFileTests(SimpleTestCase):
     def test_bundled_skill_points_at_the_file_tool(self):
         skills = {item["name"]: item for item in skillbook.load_bundled()}
         self.assertEqual(skills["estimate"]["source"], "bundled")
+        self.assertIn("revise_pending_action", skills["leave"]["body"])
+        self.assertIn("start_date", skills["leave"]["body"])
+        self.assertIn("`period`로 합치지 않습니다", skills["leave"]["body"])
         self.assertIn("propose_create_estimate", skills["estimate"]["body"])
         self.assertIn("6대", skills["estimate"]["body"])
         self.assertIn("미리보기", skills["estimate"]["body"])

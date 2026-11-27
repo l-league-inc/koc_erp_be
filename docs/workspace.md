@@ -49,7 +49,7 @@ KOC 워크스페이스의 데이터 원본은 Django입니다. Notion.com과 동
 - `python manage.py seed_koc_workspace`: 단순 여섯 영역. `section`은 비어 있습니다. 담당은 `people`이고 사용자 id입니다. 고정 스킬은 이 영역을 쓰지 않습니다.
 - `python manage.py seed_koc_pages`: CSV 원본은 `app/workspace/fixtures/koc/`입니다. 데이터베이스 13개를 `section`으로 여섯 페이지에 묶고, 값이 있는 행을 레코드로 넣습니다. 프론트 속성 표는 [koc_pages_frontend.md](koc_pages_frontend.md)입니다.
 
-`seed_koc_pages`의 페이지 키는 `hr`, `daily`, `gov`, `purchase`, `sales`, `docs`입니다. 글자는 `seed_koc_workspace` 데이터베이스 slug와 같고, 데이터는 다릅니다. 그 `hr`의 담당은 멤버 id이고, CSV `attendance.employee`는 임직원 레코드 관계입니다. 고정 스킬은 CSV 데이터베이스를 씁니다. 출근은 `attendance`, 일정은 `tasks`, 견적 레코드는 `quotes`, 출장은 `trip`, A/S는 `after_service`입니다. 견적서 파일은 `estimate` 스킬이고 레코드를 만들지 않습니다.
+`seed_koc_pages`의 페이지 키는 `hr`, `daily`, `gov`, `purchase`, `sales`, `docs`입니다. 글자는 `seed_koc_workspace` 데이터베이스 slug와 같고, 데이터는 다릅니다. 그 `hr`의 담당은 멤버 id이고, CSV `attendance.employee`는 임직원 레코드 관계입니다. 고정 스킬은 CSV 데이터베이스를 씁니다. 출근은 `attendance`, 휴가는 `leave`, 일정은 `tasks`, 견적 레코드는 `quotes`, 출장은 `trip`, A/S는 `after_service`입니다. 견적서 파일은 `estimate` 스킬이고 레코드를 만들지 않습니다.
 
 관계 대상은 세 데이터베이스입니다.
 

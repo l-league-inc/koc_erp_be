@@ -122,8 +122,9 @@ _TOOLS = [
         "function": {
             "name": "propose_update_record",
             "description": (
-                "레코드 수정 초안을 만듭니다. 사용자가 확정하기 전에는 저장하지 않습니다. "
-                "출근(attendance) 레코드는 바로 저장하고 confirmed로 돌려줍니다."
+                "이미 저장된 레코드의 수정 초안을 만듭니다. 사용자가 확정하기 전에는 저장하지 않습니다. "
+                "출근(attendance) 레코드는 바로 저장하고 confirmed로 돌려줍니다. "
+                "record_id가 없는 대기 초안은 이 도구가 아니라 revise_pending_action을 씁니다."
             ),
             "parameters": {
                 "type": "object",
@@ -131,8 +132,31 @@ _TOOLS = [
                     "record_id": {"type": "integer"},
                     "title": {"type": "string"},
                     "values": {"type": "object"},
+                    "blocks": {"type": "array", "items": {"type": "object"}},
                 },
                 "required": ["record_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "revise_pending_action",
+            "description": (
+                "아직 확정하지 않은 레코드 초안의 제목·값·본문을 고칩니다. "
+                "대기 중인 생성 초안에는 record_id가 없으므로 초안 id를 action_id로 넘깁니다. "
+                "새 초안을 만들지 않고, 저장은 사용자가 확정한 뒤에 됩니다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action_id": {"type": "integer"},
+                    "title": {"type": "string"},
+                    "values": {"type": "object"},
+                    "blocks": {"type": "array", "items": {"type": "object"}},
+                },
+                "required": ["action_id"],
                 "additionalProperties": False,
             },
         },
@@ -493,7 +517,11 @@ def _prepare_values(database, values: dict[str, Any]) -> dict[str, Any]:
     known = set(database.properties.values_list("slug", flat=True))
     unknown = [slug for slug in folded if slug not in known]
     if unknown:
-        raise HttpError(400, f"속성 {unknown[0]}을 찾을 수 없습니다.")
+        allowed = ", ".join(sorted(known))
+        raise HttpError(
+            400,
+            f"속성 {unknown[0]}을 찾을 수 없습니다. 쓸 수 있는 속성은 {allowed}입니다.",
+        )
     return folded
 
 
@@ -513,6 +541,9 @@ def _action_label(action: ProposedAction) -> str:
     if action.kind in {ProposedAction.Kind.CREATE_RECORD, ProposedAction.Kind.UPDATE_RECORD}:
         title = _preview(str(payload.get("title") or ""))
         record_id = result.get("record_id") or payload.get("record_id")
+        slug = str(payload.get("database_slug") or "")
+        if slug:
+            parts.append(f"database_slug {slug}")
         if title:
             parts.append(f"제목 {title}")
         if record_id:
@@ -552,8 +583,9 @@ def _action_ledger(session: AgentSession) -> str:
         lines.append(f"- id {action.id} {action.kind} {action.status}{suffix}")
     lines.append(
         "pending은 아직 반영 전입니다. 같은 내용의 초안을 다시 만들지 않습니다. "
+        "pending 생성 초안에는 record_id가 없습니다. 내용을 고칠 때는 적힌 id로 revise_pending_action을 한 번 호출합니다. "
         "confirmed는 사용자가 확정하여 이미 반영되었습니다. "
-        "레코드를 이어서 고칠 때는 적힌 record_id로 propose_update_record를 사용합니다. "
+        "확정된 레코드를 고칠 때는 적힌 record_id로 propose_update_record를 한 번 호출합니다. "
         "confirmed 메일은 다시 propose_send_mail하지 않습니다. "
         "confirmed 견적서는 파일이 만들어진 상태입니다."
     )
@@ -601,6 +633,30 @@ def _immediate_saved_notice(action_ids: list[int]) -> str:
     return _confirm_notice(records, [], [], [])
 
 
+def _pending_draft_notice(action_ids: list[int]) -> str:
+    if not action_ids:
+        return ""
+    parts: list[str] = []
+    actions = ProposedAction.objects.filter(id__in=action_ids).order_by("id")
+    for action in actions:
+        if action.status != ProposedAction.Status.PENDING:
+            continue
+        if action.kind not in {
+            ProposedAction.Kind.CREATE_RECORD,
+            ProposedAction.Kind.UPDATE_RECORD,
+        }:
+            continue
+        payload = action.payload or {}
+        title = _preview(str(payload.get("title") or ""))
+        label = f"초안 {action.id}"
+        if title:
+            label = f"{label} {title}"
+        parts.append(label)
+    if not parts:
+        return ""
+    return "내용을 초안에 반영했습니다. 확정하기 전에는 저장되지 않습니다. " + ", ".join(parts) + "."
+
+
 def _system_prompt(session: AgentSession, user) -> str:
     scope = session.database_slug or "전체"
     index = skillbook.active_index(session.workspace_id)
@@ -626,6 +682,11 @@ def _system_prompt(session: AgentSession, user) -> str:
         "pending 초안은 아직 반영 전입니다. "
         "출근(attendance) 생성·수정은 propose 직후 서버가 저장하고 confirmed와 record_id를 돌려줍니다. "
         "그 응답을 보면 이미 반영된 것이니 확정 전이라거나 반영할 수 없다고 말하지 않습니다. "
+        "휴가처럼 바로 저장하지 않는 생성 초안은 pending이고 record_id가 없습니다. "
+        "그 초안의 내용을 고칠 때는 초안 id로 revise_pending_action을 한 번만 호출합니다. "
+        "그때는 레코드를 조회하거나 propose_update_record를 쓰지 않습니다. "
+        "confirmed에 record_id가 있을 때만 propose_update_record를 한 번 호출합니다. "
+        "초안을 만들거나 고친 뒤에는 도구를 멈추고, 확정 전에는 저장되지 않았다고 안내합니다. "
         "confirmed로 적힌 항목은 이미 반영된 사실이니 그 내용을 다시 propose하지 않습니다. "
         "회사 밖 사실(정부지원사업, 공고, 뉴스, 법령)은 web_search로 확인하고 출처 URL을 함께 안내합니다. "
         "검색하지 않은 내용을 지어내지 않습니다. "
@@ -784,6 +845,74 @@ def _reply(session: AgentSession, answer: str, created: list[int]) -> dict[str, 
     }
 
 
+def _pending_record_action(session: AgentSession, action_id: int) -> ProposedAction | None:
+    return ProposedAction.objects.filter(
+        session=session,
+        id=action_id,
+        status=ProposedAction.Status.PENDING,
+        kind__in=[
+            ProposedAction.Kind.CREATE_RECORD,
+            ProposedAction.Kind.UPDATE_RECORD,
+        ],
+    ).first()
+
+
+def _revise_pending(
+    session: AgentSession,
+    user,
+    arguments: dict[str, Any],
+    created: list[int],
+) -> dict[str, Any]:
+    raw_id = arguments.get("action_id")
+    if raw_id is None:
+        raise HttpError(400, "초안 id가 필요합니다.")
+    action = _pending_record_action(session, int(raw_id))
+    if action is None:
+        raise HttpError(
+            404,
+            "대기 중인 초안을 찾을 수 없습니다. 확정된 레코드는 record_id로 propose_update_record를 사용합니다.",
+        )
+    payload = dict(action.payload or {})
+    if action.kind == ProposedAction.Kind.CREATE_RECORD:
+        slug = str(payload.get("database_slug") or "")
+        if session.database_slug and slug != session.database_slug:
+            raise HttpError(400, "이 대화는 선택한 영역만 다룹니다.")
+        database = _database(user, session.workspace_id, slug)
+    else:
+        record = get_record(user, int(payload["record_id"]))
+        if record.database.workspace_id != session.workspace_id:
+            raise HttpError(404, "레코드를 찾을 수 없습니다.")
+        if session.database_slug and record.database.slug != session.database_slug:
+            raise HttpError(400, "이 대화는 선택한 영역만 다룹니다.")
+        database = record.database
+    has_title = arguments.get("title") is not None
+    has_blocks = arguments.get("blocks") is not None
+    raw_values = arguments.get("values")
+    if raw_values is not None and not isinstance(raw_values, dict):
+        raise HttpError(400, "값은 객체여야 합니다.")
+    has_values = isinstance(raw_values, dict) and bool(raw_values)
+    if not has_title and not has_values and not has_blocks:
+        raise HttpError(400, "수정할 내용이 필요합니다.")
+    if has_title:
+        title = str(arguments["title"]).strip()
+        if action.kind == ProposedAction.Kind.CREATE_RECORD and not title:
+            raise HttpError(400, "제목이 필요합니다.")
+        payload["title"] = title
+    if has_values:
+        merged = dict(payload.get("values") or {})
+        merged.update(_prepare_values(database, raw_values))
+        payload["values"] = merged
+    if has_blocks:
+        if not isinstance(arguments["blocks"], list):
+            raise HttpError(400, "본문 블록은 배열이어야 합니다.")
+        payload["blocks"] = arguments["blocks"]
+    action.payload = payload
+    action.save(update_fields=["payload", "updated_at"])
+    if action.id not in created:
+        created.append(action.id)
+    return serialize_action(action)
+
+
 def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any], created: list[int]) -> Any:
     if name == "list_members":
         return list_members(user, session.workspace_id)
@@ -841,7 +970,16 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
         created.append(action.id)
         return serialize_action(action)
     if name == "propose_update_record":
-        record = get_record(user, int(arguments["record_id"]))
+        raw_id = arguments.get("record_id")
+        if raw_id is None:
+            raise HttpError(400, "레코드가 필요합니다.")
+        record_id = int(raw_id)
+        pending = _pending_record_action(session, record_id)
+        if pending is not None and not Record.objects.filter(id=record_id).exists():
+            revised = dict(arguments)
+            revised["action_id"] = pending.id
+            return _revise_pending(session, user, revised, created)
+        record = get_record(user, record_id)
         if record.database.workspace_id != session.workspace_id:
             raise HttpError(404, "레코드를 찾을 수 없습니다.")
         if session.database_slug and record.database.slug != session.database_slug:
@@ -856,6 +994,10 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
             if not isinstance(arguments["values"], dict):
                 raise HttpError(400, "값은 객체여야 합니다.")
             payload["values"] = _prepare_values(record.database, arguments["values"])
+        if arguments.get("blocks") is not None:
+            if not isinstance(arguments["blocks"], list):
+                raise HttpError(400, "본문 블록은 배열이어야 합니다.")
+            payload["blocks"] = arguments["blocks"]
         with transaction.atomic():
             action = ProposedAction.objects.create(
                 session=session,
@@ -865,6 +1007,8 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
             _confirm_immediate_record(user, session, action)
         created.append(action.id)
         return serialize_action(action)
+    if name == "revise_pending_action":
+        return _revise_pending(session, user, arguments, created)
     if name == "list_skills":
         return skillbook.active_index(session.workspace_id)
     if name == "view_skill":
@@ -1016,7 +1160,7 @@ def send_message(user, session_id: int, content: str, model: str = "") -> dict[s
                 }
             )
     else:
-        answer = "요청을 마치지 못했습니다. 다시 말해 주세요."
+        answer = _pending_draft_notice(created) or "요청을 마치지 못했습니다. 다시 말해 주세요."
     saved_notice = _immediate_saved_notice(created)
     if saved_notice:
         answer = saved_notice
@@ -1046,13 +1190,16 @@ def _apply_proposed_action(user, session: AgentSession, action: ProposedAction) 
             "title": saved["title"],
         }
     elif action.kind == ProposedAction.Kind.UPDATE_RECORD:
+        update_data: dict[str, Any] = {
+            "title": payload.get("title"),
+            "values": payload.get("values"),
+        }
+        if "blocks" in payload:
+            update_data["blocks"] = payload.get("blocks") or []
         saved = update_record(
             user,
             int(payload["record_id"]),
-            {
-                "title": payload.get("title"),
-                "values": payload.get("values"),
-            },
+            update_data,
             RecordActivity.Source.AGENT,
         )
         action.result = {"record_id": saved["id"]}

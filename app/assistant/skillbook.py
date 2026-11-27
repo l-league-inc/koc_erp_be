@@ -12,6 +12,7 @@ from workspace.utils import get_membership, validate_slug
 _SKILL_DIR = Path(__file__).resolve().parent / "skills"
 BUNDLED_NAMES = (
     "attendance",
+    "leave",
     "schedule",
     "quote",
     "estimate",

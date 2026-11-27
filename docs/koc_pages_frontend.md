@@ -89,6 +89,7 @@ CSV에 값이 없어 시드가 미리 넣는 옵션:
 | 데이터베이스 | slug | 옵션 name |
 |--------------|------|-----------|
 | `leave` | `approval_status` | 대기, 승인, 반려 |
+| `attendance` | `overtime_status` | 대기, 승인, 반려 |
 | `expenses` | `expense_kind` | 확인필요 |
 | `expenses` | `execution_status` | 대기, 진행 중, 완료 |
 | `clients` | `account_status` | 거래중, 중단 |
@@ -130,7 +131,14 @@ CSV에 값이 없어 시드가 미리 넣는 옵션:
 | `employee` | 임직원 | `relation` → `employees` |
 | `check_in` | 출근시각 | `date` |
 | `check_out` | 퇴근시각 | `date` |
+| `overtime_minutes` | 야근시간(분) | `number` |
+| `overtime_reason` | 야근사유 | `text` |
+| `overtime_status` | 야근승인 | `status` |
 | `confirmed_by` | 확인담당 | `relation` → `employees` |
+
+출근시각과 퇴근시각은 출퇴근 API가 현재 시각으로 넣습니다. 멤버가 표에서 시각, 지난 근무일, 다른 임직원을 바꾸면 403입니다. 관리자는 표에서 시각을 고칠 수 있습니다. 대화와 MCP로는 관리자도 시각을 넣지 못합니다.
+
+야근은 `overtime_minutes`에 분 단위로 신청합니다. 1 이상 720 이하입니다. 멤버가 저장하면 `overtime_status`는 `대기`가 되고, 본인 행만 신청할 수 있습니다. `승인`이나 `반려`는 관리자만 바꿉니다. `승인`된 뒤에는 멤버가 시간과 사유를 고치지 못합니다. 신청이 접수되면 소유자와 관리자에게 알림이 갑니다. `metadata.kind`는 `overtime`이고 `workspace_id`, `record_id`, `database_slug`가 있습니다.
 
 제목이 비어 있던 시드 행은 `2026년 10월 12일 출근`처럼 근무일 뒤에 `출근`을 붙입니다.
 

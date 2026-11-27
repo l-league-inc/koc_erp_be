@@ -50,4 +50,4 @@ applyTo: "**"
 | [voice_frontend.md](../docs/voice_frontend.md) | 음성 등록, 비공개 S3 presigned 업로드·재생 |
 | [mail_frontend.md](../docs/mail_frontend.md) | Daum·Naver 메일 계정, IMAP 조회, SMTP 발송, 에이전트·MCP |
 | [estimate_frontend.md](../docs/estimate_frontend.md) | 견적서 초안, 미리보기, PDF, 선택 메일 |
-| [attendance_frontend.md](../docs/attendance_frontend.md) | 출근·퇴근 버튼, 오늘 상태, 시각 자동 입력 |
+| [attendance_frontend.md](../docs/attendance_frontend.md) | 출근·퇴근 버튼, 오늘 상태, 야근 신청·관리자 승인 |

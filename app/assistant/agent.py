@@ -105,7 +105,9 @@ _TOOLS = [
             "name": "propose_create_record",
             "description": (
                 "레코드 생성 초안을 만듭니다. 사용자가 확정하기 전에는 저장하지 않습니다. "
-                "database_slug가 attendance이면 초안 없이 바로 저장하고 confirmed로 돌려줍니다."
+                "database_slug가 attendance이면 초안 없이 바로 저장하고 confirmed로 돌려줍니다. "
+                "check_in과 check_out은 넣지 않습니다. 야근은 overtime_minutes와 overtime_reason만 넣고, "
+                "승인 전에는 대기입니다."
             ),
             "parameters": {
                 "type": "object",
@@ -127,6 +129,7 @@ _TOOLS = [
             "description": (
                 "이미 저장된 레코드의 수정 초안을 만듭니다. 사용자가 확정하기 전에는 저장하지 않습니다. "
                 "출근(attendance) 레코드는 바로 저장하고 confirmed로 돌려줍니다. "
+                "check_in, check_out, overtime_status는 넣지 않습니다. "
                 "record_id가 없는 대기 초안은 이 도구가 아니라 revise_pending_action을 씁니다."
             ),
             "parameters": {
@@ -668,6 +671,22 @@ def _immediate_saved_notice(action_ids: list[int]) -> str:
         records.append({"record_id": record_id, "title": title})
     if not records:
         return ""
+    pending_overtime = False
+    for action in actions:
+        payload_values = (action.payload or {}).get("values") or {}
+        status = str(payload_values.get("overtime_status") or "")
+        minutes = payload_values.get("overtime_minutes")
+        if minutes not in (None, "", 0, "0") and status != "승인":
+            pending_overtime = True
+    if pending_overtime:
+        labels = ", ".join(
+            f"레코드 {item['record_id']} {item['title']}".rstrip() for item in records
+        )
+        return (
+            "야근 신청이 접수되었습니다. 관리자 승인 전에는 근무 시간에 포함되지 않습니다. "
+            + labels
+            + "."
+        )
     return _confirm_notice(records, [], [], [])
 
 
@@ -708,6 +727,9 @@ def _system_prompt(session: AgentSession, user) -> str:
         f"사용자 id는 {user.id}이며 {_user_identity(user)} "
         "다른 사람을 지목하지 않은 출근은 find_self_employee로 본인을 정하고 바로 저장합니다. "
         "그 경우 이름을 묻지 않습니다. "
+        "출근·퇴근 시각은 사용자가 말한 시각으로 넣지 않습니다. 서버가 현재 시각만 저장합니다. "
+        "야근은 overtime_minutes(분)와 overtime_reason만 넣고 overtime_status는 넣지 않습니다. "
+        "저장돼도 대기이며, 관리자가 승인하기 전에는 야근으로 반영되지 않았다고 안내합니다. "
         "멤버, 스키마, 레코드는 도구로 조회합니다. "
         "values의 키는 get_database_schema에 있는 slug만 사용합니다. "
         "날짜 범위는 그 date 속성에 {\"start\",\"end\"}로 넣습니다. "
@@ -721,6 +743,7 @@ def _system_prompt(session: AgentSession, user) -> str:
         "레코드나 스킬을 만들거나 고칠 때는 propose 도구만 사용합니다. "
         "pending 초안은 아직 반영 전입니다. "
         "출근(attendance) 생성·수정은 propose 직후 서버가 저장하고 confirmed와 record_id를 돌려줍니다. "
+        "다만 야근 신청은 대기이며 관리자 승인 전에는 반영되지 않습니다. "
         "그 응답을 보면 이미 반영된 것이니 확정 전이라거나 반영할 수 없다고 말하지 않습니다. "
         "휴가처럼 바로 저장하지 않는 생성 초안은 pending이고 record_id가 없습니다. "
         "그 초안의 내용을 고칠 때는 초안 id로 revise_pending_action을 한 번만 호출합니다. "
@@ -868,6 +891,7 @@ def _clock_in_self(user, session: AgentSession, text: str) -> dict[str, Any] | N
                 "title": f"{today} 출근",
                 "values": values,
                 "blocks": [],
+                "clock": True,
             },
         )
         _confirm_immediate_record(user, session, action)
@@ -1364,6 +1388,7 @@ def _apply_proposed_action(user, session: AgentSession, action: ProposedAction) 
     payload = dict(action.payload or {})
     if action.kind == ProposedAction.Kind.CREATE_RECORD:
         database = _database(user, session.workspace_id, payload["database_slug"])
+        clock = bool(payload.pop("clock", False))
         values = _aligned_payload_values(database, payload)
         action.payload = payload
         saved = create_record(
@@ -1375,6 +1400,7 @@ def _apply_proposed_action(user, session: AgentSession, action: ProposedAction) 
                 "blocks": payload.get("blocks") or [],
             },
             RecordActivity.Source.AGENT,
+            clock=clock,
         )
         action.result = {"record_id": saved["id"]}
         bucket = "records"
@@ -1389,6 +1415,8 @@ def _apply_proposed_action(user, session: AgentSession, action: ProposedAction) 
             "title": payload.get("title"),
             "values": payload.get("values"),
         }
+        clock = bool(payload.pop("clock", False))
+        action.payload = payload
         if isinstance(payload.get("values"), dict):
             record = get_record(user, int(payload["record_id"]))
             update_data["values"] = _aligned_payload_values(record.database, payload, record)
@@ -1400,6 +1428,7 @@ def _apply_proposed_action(user, session: AgentSession, action: ProposedAction) 
             int(payload["record_id"]),
             update_data,
             RecordActivity.Source.AGENT,
+            clock=clock,
         )
         action.result = {"record_id": saved["id"]}
         bucket = "records"

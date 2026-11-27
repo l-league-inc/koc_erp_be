@@ -3,7 +3,12 @@ from ninja import Router
 
 from api.security import jwt_auth
 from attendance import service
-from attendance.schema import AttendanceActionSchema, AttendanceStatusSchema
+from attendance.schema import (
+    AttendanceActionSchema,
+    AttendanceStatusSchema,
+    OvertimeDecisionSchema,
+    OvertimeRequestSchema,
+)
 
 router = Router(tags=["Attendance"])
 
@@ -39,3 +44,35 @@ async def clock_in_api(request, payload: AttendanceActionSchema):
 )
 async def clock_out_api(request, payload: AttendanceActionSchema):
     return await sync_to_async(service.clock_out)(request.auth, payload.workspace_id)
+
+
+@router.post(
+    "/overtime",
+    summary="[C] 야근 신청",
+    description="오늘 출근 행에 야근 시간(분)을 신청합니다. 상태는 대기이며 관리자 승인 전에는 반영되지 않습니다.",
+    response=AttendanceStatusSchema,
+    auth=jwt_auth,
+)
+async def request_overtime_api(request, payload: OvertimeRequestSchema):
+    return await sync_to_async(service.request_overtime)(
+        request.auth,
+        payload.workspace_id,
+        payload.minutes,
+        payload.reason,
+    )
+
+
+@router.post(
+    "/overtime/decide",
+    summary="[C] 야근 승인",
+    description="관리자 또는 소유자가 야근 신청을 승인하거나 반려합니다.",
+    response=AttendanceStatusSchema,
+    auth=jwt_auth,
+)
+async def decide_overtime_api(request, payload: OvertimeDecisionSchema):
+    return await sync_to_async(service.decide_overtime)(
+        request.auth,
+        payload.workspace_id,
+        payload.record_id,
+        payload.decision,
+    )

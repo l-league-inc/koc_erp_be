@@ -5,13 +5,15 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from ninja.errors import HttpError
 from ninja.testing import TestAsyncClient
 
 from attendance.api import router
+from notification.models import Notification
 from user.utils import get_access_token
-from workspace.models import Database, Property, Record, RecordActivity, Workspace
+from workspace.models import Database, Property, Record, RecordActivity, Workspace, WorkspaceMember
 from workspace.seed import seed_koc_workspace
-from workspace.utils import create_record, export_values
+from workspace.utils import create_record, delete_record, export_values, update_record
 
 User = get_user_model()
 
@@ -32,11 +34,26 @@ class AttendanceApiTests(TestCase):
         self.workspace = Workspace.objects.get(slug="koc")
         self.employees, self.attendance = self._tables()
 
-    def headers(self):
+    def headers(self, user=None):
+        user = user or self.user
         token, _expires = get_access_token(
-            {"user_id": self.user.id, "env": settings.DJANGO_ENV_NAME}
+            {"user_id": user.id, "env": settings.DJANGO_ENV_NAME}
         )
         return {"Authorization": f"Bearer {token}"}
+
+    def _member(self):
+        user = User.objects.create_user(
+            email="member@example.com",
+            password="password1234!",
+            status=User.UserStatusChoice.ACTIVE,
+            name="이멤버",
+        )
+        WorkspaceMember.objects.create(
+            workspace=self.workspace,
+            user=user,
+            role=WorkspaceMember.Role.MEMBER,
+        )
+        return user
 
     def _tables(self) -> tuple[Database, Database]:
         employees = Database.objects.create(
@@ -217,3 +234,148 @@ class AttendanceApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "근무 기록 데이터베이스가 없습니다.")
+
+    async def test_member_cannot_rewrite_clock_times_or_approved_overtime(self):
+        member = await sync_to_async(self._member)()
+        person = await sync_to_async(self._person)("이멤버", member.email)
+        with patch("attendance.service.timezone.now", return_value=MORNING):
+            clocked = await self.client.post(
+                "/clock-in",
+                json={"workspace_id": self.workspace.id},
+                headers=self.headers(member),
+            )
+            self.assertEqual(clocked.status_code, 200, clocked.json())
+            record_id = clocked.json()["record_id"]
+            self.assertIsNone(clocked.json()["overtime_minutes"])
+            self.assertIsNone(clocked.json()["overtime_status"])
+
+            requested = await self.client.post(
+                "/overtime",
+                json={"workspace_id": self.workspace.id, "minutes": 90, "reason": "납품"},
+                headers=self.headers(member),
+            )
+            forbidden = await self.client.post(
+                "/overtime/decide",
+                json={
+                    "workspace_id": self.workspace.id,
+                    "record_id": record_id,
+                    "decision": "승인",
+                },
+                headers=self.headers(member),
+            )
+            approved = await self.client.post(
+                "/overtime/decide",
+                json={
+                    "workspace_id": self.workspace.id,
+                    "record_id": record_id,
+                    "decision": "승인",
+                },
+                headers=self.headers(),
+            )
+            again = await self.client.post(
+                "/overtime",
+                json={"workspace_id": self.workspace.id, "minutes": 30, "reason": "추가"},
+                headers=self.headers(member),
+            )
+        with self.assertRaises(HttpError) as denied:
+            await sync_to_async(update_record)(
+                member,
+                record_id,
+                {"values": {"check_out": "2026-11-26T22:00:00"}},
+                RecordActivity.Source.USER,
+            )
+        self.assertEqual(denied.exception.status_code, 403)
+        self.assertEqual(denied.exception.message, "출근·퇴근 시각은 직접 수정할 수 없습니다.")
+
+        await sync_to_async(update_record)(
+            member,
+            record_id,
+            {"values": {"check_in": "2026-11-26T09:01:02"}},
+            RecordActivity.Source.USER,
+        )
+        with self.assertRaises(HttpError) as agent_denied:
+            await sync_to_async(update_record)(
+                self.user,
+                record_id,
+                {"values": {"check_out": "2026-11-26T22:00:00"}},
+                RecordActivity.Source.AGENT,
+            )
+        self.assertEqual(agent_denied.exception.status_code, 403)
+
+        corrected = await sync_to_async(update_record)(
+            self.user,
+            record_id,
+            {"values": {"check_out": "2026-11-26T19:00:00"}},
+            RecordActivity.Source.USER,
+        )
+        self.assertTrue(str(corrected["values"]["check_out"]).startswith("2026-11-26T19:00:00"))
+
+        self.assertEqual(requested.status_code, 200, requested.json())
+        self.assertEqual(requested.json()["overtime_minutes"], 90)
+        self.assertEqual(requested.json()["overtime_reason"], "납품")
+        self.assertEqual(requested.json()["overtime_status"], "대기")
+        self.assertEqual(requested.json()["employee_id"], person["id"])
+        note = await Notification.objects.filter(user=self.user, metadata__kind="overtime").afirst()
+        self.assertIsNotNone(note)
+        self.assertEqual(note.metadata["record_id"], record_id)
+        self.assertIn("90분", note.message)
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(forbidden.json()["detail"], "관리자만 야근을 승인할 수 있습니다.")
+        self.assertEqual(approved.status_code, 200, approved.json())
+        self.assertEqual(approved.json()["overtime_status"], "승인")
+        self.assertEqual(approved.json()["overtime_minutes"], 90)
+        self.assertEqual(again.status_code, 403)
+        self.assertEqual(again.json()["detail"], "승인된 야근 시간은 수정할 수 없습니다.")
+
+        with self.assertRaises(HttpError) as locked:
+            await sync_to_async(delete_record)(member, record_id)
+        self.assertEqual(locked.exception.status_code, 403)
+        self.assertEqual(locked.exception.message, "근무 기록은 직접 삭제할 수 없습니다.")
+
+    async def test_overtime_requires_clock_in_and_rejects_other_people(self):
+        member = await sync_to_async(self._member)()
+        await sync_to_async(self._person)("이멤버", member.email)
+        missing = await self.client.post(
+            "/overtime",
+            json={"workspace_id": self.workspace.id, "minutes": 30, "reason": ""},
+            headers=self.headers(member),
+        )
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(missing.json()["detail"], "출근 기록이 없습니다.")
+
+        other = await sync_to_async(self._person)("다른사람", "other@example.com")
+        foreign = await sync_to_async(create_record)(
+            self.user,
+            self.attendance.id,
+            {
+                "title": "2026-11-26 출근",
+                "values": {
+                    "work_date": "2026-11-26",
+                    "employee": [other["id"]],
+                    "check_in": "2026-11-26T09:00:00",
+                },
+            },
+            RecordActivity.Source.USER,
+        )
+        with self.assertRaises(HttpError) as denied:
+            await sync_to_async(update_record)(
+                member,
+                foreign["id"],
+                {"values": {"overtime_minutes": 60, "overtime_reason": "대신"}},
+                RecordActivity.Source.USER,
+            )
+        self.assertEqual(denied.exception.status_code, 403)
+        self.assertEqual(denied.exception.message, "본인 근무 기록에만 야근을 신청할 수 있습니다.")
+
+        with self.assertRaises(HttpError) as past:
+            await sync_to_async(create_record)(
+                member,
+                self.attendance.id,
+                {
+                    "title": "2020-01-01 출근",
+                    "values": {"work_date": "2020-01-01", "employee": [other["id"]]},
+                },
+                RecordActivity.Source.USER,
+            )
+        self.assertEqual(past.exception.status_code, 403)
+        self.assertEqual(past.exception.message, "근무일과 임직원은 본인 오늘 기록만 만들 수 있습니다.")

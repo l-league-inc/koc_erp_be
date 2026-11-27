@@ -1859,7 +1859,15 @@ def delete_record_object(record: Record) -> None:
 
 
 @transaction.atomic
-def create_record(user, database_id: int, data: dict[str, Any], source: str) -> dict[str, Any]:
+def create_record(
+    user,
+    database_id: int,
+    data: dict[str, Any],
+    source: str,
+    *,
+    clock: bool = False,
+) -> dict[str, Any]:
+    from attendance.guard import guard_attendance_write
     from workspace.access import require_content_write
 
     database = get_database(user, database_id)
@@ -1886,6 +1894,7 @@ def create_record(user, database_id: int, data: dict[str, Any], source: str) -> 
     if data.get("values") is not None:
         values.update(data["values"])
     values[title_property(database).slug] = title
+    guard_attendance_write(user, database, values, record, clock=clock, source=source)
     apply_values(record, values)
     blocks = list(template.blocks if template is not None else [])
     if "blocks" in data and data.get("blocks") is not None:
@@ -1899,7 +1908,15 @@ def create_record(user, database_id: int, data: dict[str, Any], source: str) -> 
 
 
 @transaction.atomic
-def update_record(user, record_id: int, data: dict[str, Any], source: str) -> dict[str, Any]:
+def update_record(
+    user,
+    record_id: int,
+    data: dict[str, Any],
+    source: str,
+    *,
+    clock: bool = False,
+) -> dict[str, Any]:
+    from attendance.guard import guard_attendance_write
     from workspace.access import require_content_write
     from workspace.blocksync import lock_owner, sync_blocks
     from workspace.revisions import BodyEdit
@@ -1919,6 +1936,14 @@ def update_record(user, record_id: int, data: dict[str, Any], source: str) -> di
         values = {} if values is None else values
         values[title_property(record.database).slug] = title
     if values is not None:
+        guard_attendance_write(
+            user,
+            record.database,
+            values,
+            record,
+            clock=clock,
+            source=source,
+        )
         apply_values(record, values)
     if data.get("blocks") is not None:
         synced = sync_blocks(
@@ -1939,10 +1964,12 @@ def update_record(user, record_id: int, data: dict[str, Any], source: str) -> di
 
 @transaction.atomic
 def delete_record(user, record_id: int) -> None:
+    from attendance.guard import reject_member_attendance_delete
     from workspace.access import require_content_write
 
     record = get_record(user, record_id)
     require_content_write(user, database=record.database)
+    reject_member_attendance_delete(user, record)
     workspace_id = record.database.workspace_id
     deleted_id = record.id
     record.delete()

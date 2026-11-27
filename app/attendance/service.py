@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from django.db import transaction
@@ -7,10 +8,14 @@ from ninja.errors import HttpError
 
 from assistant.agent import find_self_employee
 from workspace.models import RecordActivity
+from attendance.guard import ensure_overtime_properties
+from workspace.models import WorkspaceMember
 from workspace.utils import (
     accessible_databases,
     create_record,
+    export_values,
     get_membership,
+    get_record,
     query_records,
     update_record,
 )
@@ -47,6 +52,7 @@ def clock_in(user, workspace_id: int) -> dict[str, Any]:
                 database.id,
                 {"title": f"{today} 출근", "values": values},
                 RecordActivity.Source.USER,
+                clock=True,
             )
             return _status(employee, saved, today)
         if _clock_text((row.get("values") or {}).get("check_in")):
@@ -56,6 +62,7 @@ def clock_in(user, workspace_id: int) -> dict[str, Any]:
             int(row["id"]),
             {"values": {"check_in": stamp}},
             RecordActivity.Source.USER,
+            clock=True,
         )
     return _status(employee, saved, today)
 
@@ -78,8 +85,63 @@ def clock_out(user, workspace_id: int) -> dict[str, Any]:
             int(row["id"]),
             {"values": {"check_out": stamp}},
             RecordActivity.Source.USER,
+            clock=True,
         )
     return _status(employee, saved, today)
+
+
+def request_overtime(user, workspace_id: int, minutes: int, reason: str) -> dict[str, Any]:
+    if isinstance(minutes, bool) or not isinstance(minutes, int) or minutes < 1 or minutes > 12 * 60:
+        raise HttpError(400, "야근 시간은 1분 이상 720분 이하입니다.")
+    database, _slugs = _attendance(user, workspace_id)
+    employee = _employee(user, workspace_id)
+    moment = _moment()
+    today = moment.date().isoformat()
+    with transaction.atomic():
+        row = _today_row(user, workspace_id, int(employee["id"]), today)
+        values = (row or {}).get("values") or {}
+        if row is None or not _clock_text(values.get("check_in")):
+            raise HttpError(400, "출근 기록이 없습니다.")
+        ensure_overtime_properties(database)
+        saved = update_record(
+            user,
+            int(row["id"]),
+            {"values": {"overtime_minutes": minutes, "overtime_reason": reason}},
+            RecordActivity.Source.USER,
+        )
+    return _status(employee, saved, today)
+
+
+def decide_overtime(user, workspace_id: int, record_id: int, decision: str) -> dict[str, Any]:
+    database, slugs = _attendance(user, workspace_id)
+    membership = get_membership(user, workspace_id)
+    if membership.role not in {WorkspaceMember.Role.OWNER, WorkspaceMember.Role.ADMIN}:
+        raise HttpError(403, "관리자만 야근을 승인할 수 있습니다.")
+    if decision not in {"승인", "반려"}:
+        raise HttpError(400, "승인 또는 반려만 선택할 수 있습니다.")
+    record = get_record(user, record_id)
+    if record.database_id != database.id:
+        raise HttpError(404, "근무 기록을 찾을 수 없습니다.")
+    current = export_values(record)
+    if _minutes_value(current.get("overtime_minutes")) is None:
+        raise HttpError(400, "야근 신청이 없습니다.")
+    ensure_overtime_properties(database)
+    payload: dict[str, Any] = {"overtime_status": decision}
+    if decision == "승인" and "confirmed_by" in slugs:
+        approver = find_self_employee(user, workspace_id)
+        if approver.get("found"):
+            payload["confirmed_by"] = [int(approver["id"])]
+    saved = update_record(
+        user,
+        record.id,
+        {"values": payload},
+        RecordActivity.Source.USER,
+    )
+    cards = (saved.get("values") or {}).get("employee") or []
+    if not cards or not isinstance(cards[0], dict):
+        raise HttpError(400, "임직원 기록이 없습니다.")
+    employee = {"id": int(cards[0]["id"]), "title": str(cards[0].get("title") or "")}
+    return _status(employee, saved, _date_text((saved.get("values") or {}).get("work_date")) or "")
 
 
 def _attendance(user, workspace_id: int):
@@ -178,6 +240,40 @@ def _status(employee: dict[str, Any], record: dict[str, Any] | None, today: str)
         "work_date": _date_text(values.get("work_date")) or today,
         "check_in": check_in,
         "check_out": check_out,
+        "overtime_minutes": _minutes_value(values.get("overtime_minutes")),
+        "overtime_reason": _reason_text(values.get("overtime_reason")),
+        "overtime_status": _status_text(values.get("overtime_status")),
         "employee_id": int(employee["id"]),
         "employee_title": str(employee["title"]),
     }
+
+
+def _minutes_value(raw: Any) -> int | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        number = Decimal(str(raw))
+    except (InvalidOperation, ValueError):
+        return None
+    if number != number.to_integral_value():
+        return None
+    minutes = int(number)
+    if minutes < 1:
+        return None
+    return minutes
+
+
+def _reason_text(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
+def _status_text(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if text not in {"대기", "승인", "반려"}:
+        return None
+    return text

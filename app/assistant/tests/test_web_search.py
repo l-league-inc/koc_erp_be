@@ -68,6 +68,22 @@ class WebSearchTests(SimpleTestCase):
         self.assertIs(kwargs["include_answer"], False)
         self.assertIs(kwargs["include_raw_content"], False)
 
+    @override_settings(TAVILY_API_KEY="tvly-test")
+    @patch("assistant.web_search.TavilyClient")
+    def test_grant_schedule_searches_iris_only(self, client_cls):
+        client_cls.return_value.search.return_value = {"results": []}
+        search_web("전남대 기준이 아니라 정부과제 공고 마감 일정")
+        kwargs = client_cls.return_value.search.call_args.kwargs
+        self.assertEqual(kwargs["include_domains"], ["iris.go.kr"])
+
+    @override_settings(TAVILY_API_KEY="tvly-test")
+    @patch("assistant.web_search.TavilyClient")
+    def test_campus_deadline_is_not_forced_to_iris(self, client_cls):
+        client_cls.return_value.search.return_value = {"results": []}
+        search_web("정부과제 산학협력단 내부 마감")
+        kwargs = client_cls.return_value.search.call_args.kwargs
+        self.assertNotIn("include_domains", kwargs)
+
     @override_settings(TAVILY_API_KEY="tvly-secret")
     @patch("assistant.web_search.TavilyClient")
     def test_failure_does_not_expose_key(self, client_cls):

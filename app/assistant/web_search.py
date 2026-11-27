@@ -1,5 +1,6 @@
 """회사 밖 정보를 찾을 때 쓰는 Tavily 검색."""
 
+import re
 from typing import Any
 
 from django.conf import settings
@@ -12,6 +13,10 @@ _DEFAULT_RESULTS = 5
 _MAX_RESULTS = 8
 _TIME_RANGES = {"day", "week", "month", "year"}
 _TOPICS = {"general", "news"}
+_IRIS_DOMAIN = "iris.go.kr"
+_GRANT_QUERY = re.compile(r"정부\s*과제|정부지원사업|정부\s*지원\s*사업|연구개발|범부처|IRIS|iris")
+_SCHEDULE_QUERY = re.compile(r"공고|일정|마감|접수|모집|신청\s*기간")
+_INTERNAL_DEADLINE = re.compile(r"교내|내부\s*마감|산학협력단")
 
 TOOL = {
     "type": "function",
@@ -36,6 +41,18 @@ TOOL = {
         },
     },
 }
+
+
+def official_notice_domains(query: str, include_domains: list[str] | None) -> list[str] | None:
+    """정부과제 공고 일정은 IRIS만 검색합니다. 도메인을 지정했거나 교내 마감이면 그대로 둡니다."""
+    if include_domains:
+        return include_domains
+    text = query or ""
+    if _INTERNAL_DEADLINE.search(text):
+        return include_domains
+    if _GRANT_QUERY.search(text) and _SCHEDULE_QUERY.search(text):
+        return [_IRIS_DOMAIN]
+    return include_domains
 
 
 def search_web(
@@ -72,6 +89,7 @@ def search_web(
         ):
             raise HttpError(400, "도메인은 문자열 배열이어야 합니다.")
         domains = [item.strip() for item in include_domains]
+    domains = official_notice_domains(text, domains or None) or []
 
     api_key = str(getattr(settings, "TAVILY_API_KEY", "") or "").strip()
     if not api_key:

@@ -1139,6 +1139,7 @@ class AgentApiTests(TestCase):
         self.assertIn("정부지원사업", skill["description"])
         self.assertIn("web_search", skill["body"])
         self.assertIn("출처 URL", skill["body"])
+        self.assertIn("iris.go.kr", skill["body"])
 
         rejected = await self.client.post(
             "/skill",

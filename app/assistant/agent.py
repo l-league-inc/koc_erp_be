@@ -731,6 +731,8 @@ def _system_prompt(session: AgentSession, user) -> str:
         "재고를 다른 품목으로 정정할 때만 그 record_id의 quantity를 되돌리는 초안을 다시 만듭니다. "
         "그 외에는 확정된 내용을 다시 propose하지 않습니다. "
         "회사 밖 사실(정부지원사업, 공고, 뉴스, 법령)은 web_search로 확인하고 출처 URL을 함께 안내합니다. "
+        "정부과제 공고 일정과 마감일은 iris.go.kr 공식 공고만 기준으로 안내합니다. "
+        "대학이나 산학협력단 페이지의 마감은 공식 일정으로 말하지 않습니다. "
         "검색하지 않은 내용을 지어내지 않습니다. "
         "회사 문서는 search_documents로 찾고 get_document의 extracted_text로 본문을 읽습니다. "
         "이미지, 음성, 영상은 kind와 media_kind로 고릅니다. "

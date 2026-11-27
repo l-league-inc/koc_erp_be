@@ -319,6 +319,97 @@ class AgentApiTests(TestCase):
         )
         self.assertEqual(cleared["values"]["quantity"], "0")
 
+    def _stock_pair(self, workspace_id: int) -> tuple[int, int]:
+        workspace = Workspace.objects.get(id=workspace_id)
+        database = Database.objects.create(workspace=workspace, name="재고", slug="inventory")
+        Property.objects.create(
+            database=database, name="품목명", slug="title", type=Property.Type.TITLE
+        )
+        Property.objects.create(
+            database=database, name="현재고", slug="quantity", type=Property.Type.NUMBER
+        )
+        bolt = create_record(
+            self.user,
+            database.id,
+            {"title": "볼트", "values": {"quantity": 10}},
+            RecordActivity.Source.USER,
+        )
+        nut = create_record(
+            self.user,
+            database.id,
+            {"title": "너트", "values": {"quantity": 8}},
+            RecordActivity.Source.USER,
+        )
+        update_record(
+            self.user,
+            bolt["id"],
+            {"values": {"quantity": 7}},
+            RecordActivity.Source.AGENT,
+        )
+        return bolt["id"], nut["id"]
+
+    async def test_stock_correction_restores_the_confirmed_item(self):
+        workspace_id = await self._workspace_id()
+        bolt_id, nut_id = await sync_to_async(self._stock_pair)(workspace_id)
+        created = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id, "database_slug": "inventory"},
+            headers=self.headers(),
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        session_id = created.json()["id"]
+        await sync_to_async(ProposedAction.objects.create)(
+            session_id=session_id,
+            kind=ProposedAction.Kind.UPDATE_RECORD,
+            status=ProposedAction.Status.CONFIRMED,
+            payload={
+                "record_id": bolt_id,
+                "database_slug": "inventory",
+                "values": {"quantity": 7},
+            },
+            result={"record_id": bolt_id},
+        )
+
+        def complete(messages, tools, model=None):
+            if any(item.get("role") == "tool" for item in messages):
+                return {"content": "너트로 정정 초안을 만들었습니다.", "tool_calls": []}
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "move_nut",
+                        "name": "propose_update_record",
+                        "arguments": {"record_id": nut_id, "values": {"quantity": 5}},
+                    }
+                ],
+            }
+
+        with patch("assistant.agent.llm.complete", complete):
+            message = await self.client.post(
+                f"/session/{session_id}/message",
+                json={"content": "착오였다. 볼트 말고 너트로 정정해줘"},
+                headers=self.headers(),
+            )
+        self.assertEqual(message.status_code, 200, message.json())
+        actions = message.json()["proposed_actions"]
+        self.assertEqual(len(actions), 2)
+        by_record = {item["payload"]["record_id"]: item for item in actions}
+        self.assertEqual(by_record[nut_id]["payload"]["values"]["quantity"], 5)
+        self.assertEqual(by_record[bolt_id]["payload"]["values"]["quantity"], "10")
+        self.assertEqual(by_record[bolt_id]["status"], "pending")
+        self.assertIn("되돌리는 초안", message.json()["message"]["content"])
+        self.assertEqual(await sync_to_async(self._quantity)(bolt_id), "7")
+        self.assertEqual(await sync_to_async(self._quantity)(nut_id), "8")
+
+        confirmed = await self.client.post(
+            f"/session/{session_id}/confirm",
+            json={"action_ids": [item["id"] for item in actions]},
+            headers=self.headers(),
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.json())
+        self.assertEqual(await sync_to_async(self._quantity)(bolt_id), "10")
+        self.assertEqual(await sync_to_async(self._quantity)(nut_id), "5")
+
     async def test_next_turn_sees_confirmed_draft(self):
         workspace_id = await self._workspace_id()
         created = await self.client.post(

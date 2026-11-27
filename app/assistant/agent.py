@@ -1,7 +1,7 @@
 import json
 import re
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from django.db import transaction
@@ -18,7 +18,7 @@ from estimate.compose import draft_from_payload
 from estimate.errors import EstimateError
 from estimate.schema import EstimateDraft
 from estimate.service import document_payload
-from workspace.models import Property, Record, RecordActivity
+from workspace.models import Property, PropertyValue, Record, RecordActivity
 from document.utils import get_file_detail, search_files
 from mail import service as mail_service
 from workspace.utils import (
@@ -26,6 +26,7 @@ from workspace.utils import (
     create_record,
     fold_date_range_aliases,
     get_membership,
+    STOCK_DATABASE_SLUGS,
     get_record,
     guard_stock_quantity,
     list_members,
@@ -622,6 +623,7 @@ def _action_ledger(session: AgentSession) -> str:
         "pending 생성 초안에는 record_id가 없습니다. 내용을 고칠 때는 적힌 id로 revise_pending_action을 한 번 호출합니다. "
         "confirmed는 사용자가 확정하여 이미 반영되었습니다. "
         "확정된 레코드를 고칠 때는 적힌 record_id로 propose_update_record를 한 번 호출합니다. "
+        "확정된 재고를 다른 품목으로 정정할 때는 그 record_id의 quantity를 확정 전 값으로 되돌리는 초안도 만듭니다. "
         "confirmed 메일은 다시 propose_send_mail하지 않습니다. "
         "confirmed 견적서는 파일이 만들어진 상태입니다."
     )
@@ -711,6 +713,7 @@ def _system_prompt(session: AgentSession, user) -> str:
         "날짜 범위는 그 date 속성에 {\"start\",\"end\"}로 넣습니다. "
         "스키마에 없는 start_date나 end_date는 넣지 않습니다. "
         "재고 quantity는 0 미만이 될 수 없습니다. 보유 수량보다 많은 출고는 초안을 만들지 말고 부족하다고 안내합니다. "
+        "확정된 재고를 다른 품목의 착오로 정정하면, 방금 반영한 record_id의 quantity를 확정 전 값으로 되돌리는 초안과 새 품목 초안을 둘 다 만듭니다. "
         "페이지 데이터베이스의 임직원 칸은 employees 레코드 id 배열입니다. "
         "people 속성에만 list_members의 user_id를 사용합니다. "
         "아래는 스킬 이름과 설명입니다. 본문은 포함되어 있지 않습니다. "
@@ -724,7 +727,9 @@ def _system_prompt(session: AgentSession, user) -> str:
         "그때는 레코드를 조회하거나 propose_update_record를 쓰지 않습니다. "
         "confirmed에 record_id가 있을 때만 propose_update_record를 한 번 호출합니다. "
         "초안을 만들거나 고친 뒤에는 도구를 멈추고, 확정 전에는 저장되지 않았다고 안내합니다. "
-        "confirmed로 적힌 항목은 이미 반영된 사실이니 그 내용을 다시 propose하지 않습니다. "
+        "confirmed로 적힌 항목은 이미 반영된 사실입니다. "
+        "재고를 다른 품목으로 정정할 때만 그 record_id의 quantity를 되돌리는 초안을 다시 만듭니다. "
+        "그 외에는 확정된 내용을 다시 propose하지 않습니다. "
         "회사 밖 사실(정부지원사업, 공고, 뉴스, 법령)은 web_search로 확인하고 출처 URL을 함께 안내합니다. "
         "검색하지 않은 내용을 지어내지 않습니다. "
         "회사 문서는 search_documents로 찾고 get_document의 extracted_text로 본문을 읽습니다. "
@@ -1152,6 +1157,124 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
     raise HttpError(400, "지원하지 않는 도구입니다.")
 
 
+_STOCK_CORRECTION = re.compile(
+    r"착오|잘못|정정|오출고|오기재|취소|"
+    r"말고|아니라|아니고|아닌데|"
+    r"(?:품목|재고).{0,12}(?:바꿔|바꾸|고쳐|변경)|"
+    r"(?:바꿔|바꾸|고쳐|변경).{0,12}(?:품목|재고)"
+)
+
+
+def _same_quantity(left: Any, right: Any) -> bool:
+    try:
+        return Decimal(str(left)) == Decimal(str(right))
+    except (InvalidOperation, ValueError):
+        return False
+
+
+def _quantity_before_last_edit(record_id: int) -> str | None:
+    activity = (
+        RecordActivity.objects.filter(
+            record_id=record_id,
+            action=RecordActivity.Action.UPDATED,
+        )
+        .order_by("-id")
+        .first()
+    )
+    if activity is None:
+        return None
+    before = ((activity.changes or {}).get("values") or {}).get("before") or {}
+    raw = before.get("quantity")
+    if raw is None or raw == "":
+        return None
+    return str(raw)
+
+
+def _current_quantity(record_id: int) -> str | None:
+    number = (
+        PropertyValue.objects.filter(record_id=record_id, property__slug="quantity")
+        .values_list("number_value", flat=True)
+        .first()
+    )
+    if number is None:
+        return None
+    return format(number, "f").rstrip("0").rstrip(".") or "0"
+
+
+def _latest_confirmed_stock(session: AgentSession) -> tuple[int, str] | None:
+    actions = session.proposed_actions.filter(
+        status=ProposedAction.Status.CONFIRMED,
+        kind=ProposedAction.Kind.UPDATE_RECORD,
+    ).order_by("-id")
+    for action in actions:
+        payload = action.payload or {}
+        if payload.get("database_slug") not in STOCK_DATABASE_SLUGS:
+            continue
+        if "quantity" not in (payload.get("values") or {}):
+            continue
+        record_id = payload.get("record_id")
+        if not isinstance(record_id, int) or isinstance(record_id, bool):
+            continue
+        return record_id, str(payload.get("database_slug") or "")
+    return None
+
+
+def _restore_mistaken_stock(
+    user,
+    session: AgentSession,
+    text: str,
+    created: list[int],
+) -> bool:
+    """다른 품목으로 정정하면, 방금 확정한 품목의 현재고를 되돌리는 초안을 함께 둡니다."""
+    if _STOCK_CORRECTION.search(text or "") is None:
+        return False
+    confirmed = _latest_confirmed_stock(session)
+    if confirmed is None or not created:
+        return False
+    old_id, slug = confirmed
+    drafted = list(ProposedAction.objects.filter(id__in=created))
+    if any(int((action.payload or {}).get("record_id") or 0) == old_id for action in drafted):
+        return False
+    moves_other = False
+    for action in drafted:
+        if action.kind not in {
+            ProposedAction.Kind.CREATE_RECORD,
+            ProposedAction.Kind.UPDATE_RECORD,
+        }:
+            continue
+        payload = action.payload or {}
+        if payload.get("database_slug") not in STOCK_DATABASE_SLUGS:
+            continue
+        if action.kind == ProposedAction.Kind.CREATE_RECORD:
+            moves_other = True
+            break
+        record_id = payload.get("record_id")
+        if "quantity" in (payload.get("values") or {}) and record_id != old_id:
+            moves_other = True
+            break
+    if not moves_other:
+        return False
+    restored = _quantity_before_last_edit(old_id)
+    current = _current_quantity(old_id)
+    if restored is None or current is None or _same_quantity(restored, current):
+        return False
+    try:
+        get_record(user, old_id)
+    except HttpError:
+        return False
+    action = ProposedAction.objects.create(
+        session=session,
+        kind=ProposedAction.Kind.UPDATE_RECORD,
+        payload={
+            "record_id": old_id,
+            "database_slug": slug,
+            "values": {"quantity": restored},
+        },
+    )
+    created.append(action.id)
+    return True
+
+
 def send_message(user, session_id: int, content: str, model: str = "") -> dict[str, Any]:
     text = (content or "").strip()
     if not text:
@@ -1201,10 +1324,19 @@ def send_message(user, session_id: int, content: str, model: str = "") -> dict[s
                 }
             )
     else:
+        answer = ""
+    reverted = _restore_mistaken_stock(user, session, text, created)
+    if not answer:
         answer = (
             _pending_draft_notice(created)
             or stock_error
             or "요청을 마치지 못했습니다. 다시 말해 주세요."
+        )
+    elif reverted:
+        answer = (
+            answer.rstrip()
+            + " 잘못 반영된 품목의 현재고를 되돌리는 초안도 함께 두었습니다. "
+            "확정하기 전에는 저장되지 않습니다."
         )
     saved_notice = _immediate_saved_notice(created)
     if saved_notice:

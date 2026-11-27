@@ -27,6 +27,7 @@ from workspace.utils import (
     fold_date_range_aliases,
     get_membership,
     get_record,
+    guard_stock_quantity,
     list_members,
     match_option_name,
     query_records,
@@ -513,7 +514,7 @@ def delete_session(user, session_id: int) -> None:
     session.delete()
 
 
-def _prepare_values(database, values: dict[str, Any]) -> dict[str, Any]:
+def _prepare_values(database, values: dict[str, Any], record: Record | None = None) -> dict[str, Any]:
     folded = fold_date_range_aliases(database, values)
     props = {prop.slug: prop for prop in database.properties.all()}
     unknown = [slug for slug in folded if slug not in props]
@@ -523,7 +524,9 @@ def _prepare_values(database, values: dict[str, Any]) -> dict[str, Any]:
             400,
             f"속성 {unknown[0]}을 찾을 수 없습니다. 쓸 수 있는 속성은 {allowed}입니다.",
         )
-    return _align_option_values(props, folded)
+    aligned = _align_option_values(props, folded)
+    guard_stock_quantity(database, aligned, record)
+    return aligned
 
 
 def _align_option_values(props: dict[str, Property], values: dict[str, Any]) -> dict[str, Any]:
@@ -707,6 +710,7 @@ def _system_prompt(session: AgentSession, user) -> str:
         "values의 키는 get_database_schema에 있는 slug만 사용합니다. "
         "날짜 범위는 그 date 속성에 {\"start\",\"end\"}로 넣습니다. "
         "스키마에 없는 start_date나 end_date는 넣지 않습니다. "
+        "재고 quantity는 0 미만이 될 수 없습니다. 보유 수량보다 많은 출고는 초안을 만들지 말고 부족하다고 안내합니다. "
         "페이지 데이터베이스의 임직원 칸은 employees 레코드 id 배열입니다. "
         "people 속성에만 list_members의 user_id를 사용합니다. "
         "아래는 스킬 이름과 설명입니다. 본문은 포함되어 있지 않습니다. "
@@ -933,7 +937,8 @@ def _revise_pending(
         payload["title"] = title
     if has_values:
         merged = dict(payload.get("values") or {})
-        merged.update(_prepare_values(database, raw_values))
+        stock_record = record if action.kind == ProposedAction.Kind.UPDATE_RECORD else None
+        merged.update(_prepare_values(database, raw_values, stock_record))
         payload["values"] = merged
     if has_blocks:
         if not isinstance(arguments["blocks"], list):
@@ -1026,7 +1031,7 @@ def _dispatch(session: AgentSession, user, name: str, arguments: dict[str, Any],
         if arguments.get("values") is not None:
             if not isinstance(arguments["values"], dict):
                 raise HttpError(400, "값은 객체여야 합니다.")
-            payload["values"] = _prepare_values(record.database, arguments["values"])
+            payload["values"] = _prepare_values(record.database, arguments["values"], record)
         if arguments.get("blocks") is not None:
             if not isinstance(arguments["blocks"], list):
                 raise HttpError(400, "본문 블록은 배열이어야 합니다.")
@@ -1164,6 +1169,7 @@ def send_message(user, session_id: int, content: str, model: str = "") -> dict[s
     ]
     created: list[int] = []
     answer = ""
+    stock_error = ""
     chosen = llm.use_model(user, model)
     for _round in range(_MAX_ROUNDS):
         result = llm.complete(messages, _TOOLS, model=chosen)
@@ -1183,6 +1189,8 @@ def send_message(user, session_id: int, content: str, model: str = "") -> dict[s
                 output = _dispatch(session, user, call["name"], call["arguments"], created)
             except HttpError as exc:
                 output = {"error": exc.message}
+                if exc.message.startswith("보유 재고를 초과하는 출고입니다"):
+                    stock_error = exc.message
             except (KeyError, TypeError, ValueError):
                 output = {"error": "도구 인자가 올바르지 않습니다."}
             messages.append(
@@ -1193,18 +1201,26 @@ def send_message(user, session_id: int, content: str, model: str = "") -> dict[s
                 }
             )
     else:
-        answer = _pending_draft_notice(created) or "요청을 마치지 못했습니다. 다시 말해 주세요."
+        answer = (
+            _pending_draft_notice(created)
+            or stock_error
+            or "요청을 마치지 못했습니다. 다시 말해 주세요."
+        )
     saved_notice = _immediate_saved_notice(created)
     if saved_notice:
         answer = saved_notice
     return _reply(session, answer, created)
 
 
-def _aligned_payload_values(database, payload: dict[str, Any]) -> dict[str, Any]:
+def _aligned_payload_values(
+    database,
+    payload: dict[str, Any],
+    record: Record | None = None,
+) -> dict[str, Any]:
     raw = payload.get("values") or {}
     if not isinstance(raw, dict):
         raise HttpError(400, "값은 객체여야 합니다.")
-    values = _prepare_values(database, raw)
+    values = _prepare_values(database, raw, record)
     if values != raw:
         payload["values"] = values
     return values
@@ -1241,7 +1257,7 @@ def _apply_proposed_action(user, session: AgentSession, action: ProposedAction) 
         }
         if isinstance(payload.get("values"), dict):
             record = get_record(user, int(payload["record_id"]))
-            update_data["values"] = _aligned_payload_values(record.database, payload)
+            update_data["values"] = _aligned_payload_values(record.database, payload, record)
             action.payload = payload
         if "blocks" in payload:
             update_data["blocks"] = payload.get("blocks") or []

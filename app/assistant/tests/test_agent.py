@@ -20,7 +20,7 @@ from assistant.models import AgentSession, ProposedAction, Skill
 from user.utils import get_access_token
 from workspace.models import Database, Property, Record, RecordActivity, Workspace
 from workspace.seed import seed_koc_workspace
-from workspace.utils import create_record, serialize_record
+from workspace.utils import create_record, serialize_record, update_record
 
 User = get_user_model()
 
@@ -234,6 +234,90 @@ class AgentApiTests(TestCase):
         dropped = await values_of("상태 없는 확정")
         self.assertNotIn("status", dropped)
         self.assertEqual(dropped["memo"], "메모")
+
+    def _stock_item(self, workspace_id: int) -> int:
+        workspace = Workspace.objects.get(id=workspace_id)
+        database = Database.objects.create(workspace=workspace, name="재고", slug="inventory")
+        Property.objects.create(
+            database=database, name="품목명", slug="title", type=Property.Type.TITLE
+        )
+        Property.objects.create(
+            database=database, name="현재고", slug="quantity", type=Property.Type.NUMBER
+        )
+        saved = create_record(
+            self.user,
+            database.id,
+            {"title": "볼트", "values": {"quantity": 10}},
+            RecordActivity.Source.USER,
+        )
+        return saved["id"]
+
+    def _quantity(self, record_id: int) -> str:
+        record = Record.objects.get(id=record_id)
+        return serialize_record(record)["values"]["quantity"]
+
+    async def test_outbound_over_stock_is_not_applied(self):
+        workspace_id = await self._workspace_id()
+        record_id = await sync_to_async(self._stock_item)(workspace_id)
+        created = await self.client.post(
+            "/session",
+            json={"workspace_id": workspace_id, "database_slug": "inventory"},
+            headers=self.headers(),
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        session = await sync_to_async(AgentSession.objects.get)(id=created.json()["id"])
+
+        with self.assertRaises(HttpError) as caught:
+            await sync_to_async(_dispatch)(
+                session,
+                self.user,
+                "propose_update_record",
+                {"record_id": record_id, "values": {"quantity": -90}},
+                [],
+            )
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertIn("현재고는 10", caught.exception.message)
+        self.assertEqual(await sync_to_async(self._quantity)(record_id), "10")
+
+        def complete(messages, tools, model=None):
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "ship",
+                        "name": "propose_update_record",
+                        "arguments": {"record_id": record_id, "values": {"quantity": -90}},
+                    }
+                ],
+            }
+
+        with patch("assistant.agent.llm.complete", complete):
+            message = await self.client.post(
+                f"/session/{session.id}/message",
+                json={"content": "100개 출고 완료"},
+                headers=self.headers(),
+            )
+        self.assertEqual(message.status_code, 200, message.json())
+        self.assertIn("보유 재고를 초과하는 출고입니다", message.json()["message"]["content"])
+        self.assertNotIn("요청을 마치지 못했습니다", message.json()["message"]["content"])
+        self.assertEqual(message.json()["proposed_actions"], [])
+        self.assertEqual(await sync_to_async(self._quantity)(record_id), "10")
+
+        with self.assertRaises(HttpError):
+            await sync_to_async(update_record)(
+                self.user,
+                record_id,
+                {"values": {"quantity": -90}},
+                RecordActivity.Source.USER,
+            )
+        self.assertEqual(await sync_to_async(self._quantity)(record_id), "10")
+        cleared = await sync_to_async(update_record)(
+            self.user,
+            record_id,
+            {"values": {"quantity": 0}},
+            RecordActivity.Source.USER,
+        )
+        self.assertEqual(cleared["values"]["quantity"], "0")
 
     async def test_next_turn_sees_confirmed_draft(self):
         workspace_id = await self._workspace_id()

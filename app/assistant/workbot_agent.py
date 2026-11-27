@@ -20,6 +20,7 @@ from workspace.utils import (
     create_record,
     fold_date_range_aliases,
     get_record,
+    guard_stock_quantity,
     list_members,
     query_records,
     serialize_database,
@@ -109,7 +110,7 @@ def _database(bot: Workbot, owner, slug: str):
     return database
 
 
-def _prepare_values(database, values: Any) -> dict[str, Any]:
+def _prepare_values(database, values: Any, record=None) -> dict[str, Any]:
     if not isinstance(values, dict):
         raise HttpError(400, "값은 객체여야 합니다.")
     folded = fold_date_range_aliases(database, values)
@@ -117,6 +118,7 @@ def _prepare_values(database, values: Any) -> dict[str, Any]:
     unknown = [slug for slug in folded if slug not in known]
     if unknown:
         raise HttpError(400, f"속성 {unknown[0]}을 찾을 수 없습니다.")
+    guard_stock_quantity(database, folded, record)
     return folded
 
 
@@ -146,6 +148,7 @@ def _system_prompt(bot: Workbot, owner, spec: dict[str, Any]) -> str:
         "- 블록 모양은 {\"type\":\"heading_2\",\"content\":{\"text\":\"...\"},\"children\":[]}이고 "
         f"type은 {_BLOCK_TYPES} 중 하나입니다.\n"
         "- 같은 일을 이미 했는지(같은 제목·기간의 레코드)를 query_records로 확인하고 있으면 새로 만들지 않습니다.\n"
+        "- 재고 quantity는 0 미만으로 저장하지 않습니다. 보유 수량보다 많은 출고는 하지 않습니다.\n"
         "- 조회 결과가 없으면 없다고 답하고 불필요한 레코드를 만들지 않습니다.\n"
         "- 회사 밖 사실(정부지원사업, 공고, 뉴스, 법령, 시세)은 web_search로만 확인합니다. "
         "검색하지 않은 내용을 지어내지 않습니다.\n"
@@ -216,7 +219,7 @@ def _update(
     if arguments.get("title") is not None:
         data["title"] = str(arguments["title"])
     if arguments.get("values") is not None:
-        data["values"] = _prepare_values(record.database, arguments["values"])
+        data["values"] = _prepare_values(record.database, arguments["values"], record)
     if arguments.get("blocks") is not None:
         if not isinstance(arguments["blocks"], list):
             raise HttpError(400, "본문 블록은 배열이어야 합니다.")

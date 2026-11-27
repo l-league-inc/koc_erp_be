@@ -60,7 +60,7 @@ audience: frontend
 {"action_ids": [1]}
 ```
 
-초안 `kind`는 `create_record`, `update_record`, `create_skill`, `update_skill`, `send_mail`, `create_estimate`입니다. 레코드 `payload`는 워크스페이스 레코드 생성·수정과 같은 쓰기 모양이고, 생성은 `database_slug`를 포함합니다. 선택·상태 값은 옵션 이름 또는 id입니다. 이름 안의 공백·밑줄 차이(`진행중`과 `진행 중`)는 같은 옵션으로 맞춥니다. 스키마에 없는 값은 초안을 만들 때와 확정할 때 그 칸만 빠지고, 나머지 값은 저장됩니다. 상태 값이 옵션과 달라도 확정 전체가 400으로 막히지 않습니다. 관계 값은 레코드 id 배열입니다. 서버가 조회 도구로 읽는 관계 값은 `{id, title, database_id, database_slug}`이지만, 이 조회 결과는 화면 초안에 실리지 않습니다. 확정 뒤 레코드를 다시 조회하면 읽기 모양이 나옵니다. 페이지 데이터베이스의 임직원·거래처 칸도 레코드 id 배열입니다. `seed_koc_workspace` 여섯 영역의 `owner`만 `GET /api/v1/workspace/{workspace_id}/member`의 `user_id` 배열입니다.
+초안 `kind`는 `create_record`, `update_record`, `create_skill`, `update_skill`, `send_mail`, `create_estimate`입니다. 레코드 `payload`는 워크스페이스 레코드 생성·수정과 같은 쓰기 모양이고, 생성은 `database_slug`를 포함합니다. 재고 `inventory`의 `quantity`를 0 미만으로 확정하면 400 `보유 재고를 초과하는 출고입니다`이고 그 레코드는 그대로입니다. 선택·상태 값은 옵션 이름 또는 id입니다. 이름 안의 공백·밑줄 차이(`진행중`과 `진행 중`)는 같은 옵션으로 맞춥니다. 스키마에 없는 값은 초안을 만들 때와 확정할 때 그 칸만 빠지고, 나머지 값은 저장됩니다. 상태 값이 옵션과 달라도 확정 전체가 400으로 막히지 않습니다. 관계 값은 레코드 id 배열입니다. 서버가 조회 도구로 읽는 관계 값은 `{id, title, database_id, database_slug}`이지만, 이 조회 결과는 화면 초안에 실리지 않습니다. 확정 뒤 레코드를 다시 조회하면 읽기 모양이 나옵니다. 페이지 데이터베이스의 임직원·거래처 칸도 레코드 id 배열입니다. `seed_koc_workspace` 여섯 영역의 `owner`만 `GET /api/v1/workspace/{workspace_id}/member`의 `user_id` 배열입니다.
 
 스킬 생성 `payload`는 `name`, `description`, `body`, `enabled`입니다. 수정 `payload`는 `name`과 바뀐 `description`, `body`, `enabled`입니다. `name`은 영문 소문자로 시작하고 숫자와 `_`만 씁니다. 고정 스킬 이름 `attendance`, `leave`, `schedule`, `quote`, `estimate`, `travel`, `after_service`, `mail`, `web_search`는 만들거나 고칠 수 없습니다.
 

@@ -27,6 +27,7 @@ from workspace.models import (
 )
 
 SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,49}$")
+STOCK_DATABASE_SLUGS = frozenset({"inventory", "purchase"})
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 MCP_CLIENT_HEADER = "X-KOC-Client"
 MAX_PAGE_SIZE = 100
@@ -491,6 +492,38 @@ def match_option_name(prop: Property, raw: Any) -> str | None:
     return None
 
 
+def _format_number(number: Decimal) -> str:
+    return format(number, "f").rstrip("0").rstrip(".") or "0"
+
+
+def guard_stock_quantity(database: Database, values: dict[str, Any], record: Record | None = None) -> None:
+    """재고 현재고는 0 미만으로 저장하지 않습니다. 초과 출고는 반영 전에 거절합니다."""
+    if database.slug not in STOCK_DATABASE_SLUGS or "quantity" not in values:
+        return
+    raw = values["quantity"]
+    if raw is None or raw == "":
+        return
+    try:
+        number = Decimal(str(raw))
+    except (InvalidOperation, ValueError):
+        return
+    if number >= 0:
+        return
+    current = None
+    if record is not None:
+        current = (
+            PropertyValue.objects.filter(record=record, property__slug="quantity")
+            .values_list("number_value", flat=True)
+            .first()
+        )
+    if current is None:
+        raise HttpError(400, "보유 재고를 초과하는 출고입니다.")
+    raise HttpError(
+        400,
+        f"보유 재고를 초과하는 출고입니다. 현재고는 {_format_number(current)}입니다.",
+    )
+
+
 def canonical_option_name(prop: Property, raw: Any) -> str:
     name = match_option_name(prop, raw)
     if name is None:
@@ -855,6 +888,8 @@ def _coerce(prop: Property, raw: Any, record: Record) -> dict[str, Any]:
             number = Decimal(str(raw))
         except (InvalidOperation, ValueError):
             raise HttpError(400, "숫자 형식이 올바르지 않습니다.") from None
+        if prop.slug == "quantity":
+            guard_stock_quantity(record.database, {"quantity": number}, record)
         return {"number_value": number, "text_value": format(number, "f")}
     if prop_type == Property.Type.DATE:
         raw = _split_date_range(raw)
